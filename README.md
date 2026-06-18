@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/OS-Debian%2012-red?style=for-the-badge&logo=debian&logoColor=white" />
 </p>
 
-<h1 align="center">WLKOM</h1>
+<h1 align="center">ZeroTrust</h1>
 <h3 align="center">Wild Linux Kernel Object Module</h3>
 
 <p align="center">
