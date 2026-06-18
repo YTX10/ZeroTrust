@@ -1,0 +1,18 @@
+# TODO
+
+## A faire
+
+- Deploiement automatique du rootkit (sans scp/insmod manuels)
+- Detection dynamique de l'IP du C2 (eviter le hardcode dans module_param)
+- Mise a jour du rootkit a distance (push d'un nouveau .ko + reload)
+- Notification quand la victime reboot et que le rootkit se reconnecte
+- Reverse shell interactif (PTY complet depuis le navigateur)
+- Redirection de trafic reseau
+- Communication C2 via DNS (canal cache)
+- Detection d'environnement virtualise
+- Masquage des ports reseau utilises
+
+## Bugs connus
+
+- La prise de screenshot ne fonctionne pas sur Wayland (pas de /dev/fb0 accessible)
+- Apres un reboot de la victime, le premier dump keylogger peut etre vide

@@ -1,0 +1,27 @@
+# Compilation kernel module
+*.o
+*.ko
+*.mod
+*.mod.c
+*.order
+*.symvers
+*.cmd
+.tmp_versions/
+.cache.mk
+.wlkom.o.d
+..module-common.o.cmd
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code
+.claude/
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
