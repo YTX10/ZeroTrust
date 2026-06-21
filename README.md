@@ -268,12 +268,21 @@ sudo systemctl status libvirtd
 
 ### 4.1 - Telecharger l'ISO Debian 12
 
+**Option A (recommandee) — ISO DVD** (~4 Go, contient tous les paquets, pas besoin d'internet pendant l'installation) :
+
+```bash
+cd ~/Downloads
+wget https://cdimage.debian.org/debian-cd/current/amd64/iso-dvd/debian-12.11.0-amd64-DVD-1.iso
+```
+
+**Option B — ISO netinst** (~600 Mo, necessite un acces internet dans la VM pendant l'installation) :
+
 ```bash
 cd ~/Downloads
 wget https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-12.11.0-amd64-netinst.iso
 ```
 
-> Si le lien ne fonctionne plus : allez sur https://www.debian.org/download et prenez l'ISO **netinst** pour **amd64**.
+> Si les liens ne fonctionnent plus : allez sur https://www.debian.org/download et prenez l'ISO **DVD** ou **netinst** pour **amd64**.
 
 Verifiez que le fichier est bien telecharge :
 
@@ -299,7 +308,7 @@ virt-manager
 
 **Etape 4** - Selectionnez l'ISO :
 - Cliquez **Parcourir** → **Parcourir en local**
-- Naviguez vers `~/Downloads/` et selectionnez `debian-12.11.0-amd64-netinst.iso`
+- Naviguez vers `~/Downloads/` et selectionnez l'ISO Debian 12 telechargee
 - Le systeme detecte automatiquement "Debian 12"
 - Cliquez **Suivant**
 
@@ -343,9 +352,15 @@ L'installateur Debian se lance. Suivez ces etapes :
 | Creer un utilisateur | *(optionnel, on utilisera root)* |
 | Partitionnement | **"Assiste - utiliser un disque entier"** |
 | Schema de partition | **"Tout dans une seule partition"** |
-| Miroir Debian | `deb.debian.org` (ou miroir francais) |
+| Miroir Debian | Voir ci-dessous |
 | Proxy | *(laisser vide)* |
 | Popularity contest | Non |
+
+**Configuration du miroir Debian :**
+
+- Si vous utilisez l'**ISO DVD** : l'installateur ne demande pas de miroir (tout est sur le DVD). S'il le demande, choisissez **"Non"** / **"Continuer sans miroir reseau"**.
+- Si vous utilisez l'**ISO netinst** : selectionnez `France` → `deb.debian.org`.
+  - **Si ca boucle** (retour a l'ecran precedent) : la VM n'a pas acces a internet. Choisissez **"Revenir en arriere"** puis **"Continuer sans miroir reseau"**. Vous configurerez le miroir apres l'installation (voir ci-dessous).
 
 **Selection des logiciels** (ecran important) :
 
@@ -359,6 +374,20 @@ L'installateur Debian se lance. Suivez ces etapes :
 - Peripherique : `/dev/vda`
 
 Attendez la fin de l'installation, retirez l'ISO et redemarrez.
+
+**Si vous avez saute l'etape du miroir** : apres le reboot, connectez-vous en root et executez :
+
+```bash
+cat > /etc/apt/sources.list << 'EOF'
+deb http://deb.debian.org/debian bookworm main
+deb http://deb.debian.org/debian bookworm-updates main
+deb http://security.debian.org/debian-security bookworm-security main
+EOF
+apt update
+apt install -y openssh-server
+```
+
+Cela configure le miroir et installe le serveur SSH (necessaire pour la suite).
 
 ---
 
