@@ -658,7 +658,7 @@ ls /lib/modules/$(uname -r)/build/Makefile
 
 > Si le fichier existe, les headers sont OK.
 
-![Vérification des headers](screenshots/Partie5/verify-headers.png)
+
 
 ```bash
 # Vérifier le compilateur
