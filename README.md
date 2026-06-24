@@ -814,7 +814,7 @@ Sinon, le plus simple est d'utiliser `wget` ou `curl` depuis la VM pour récupé
 ```bash
 # En root sur la VM victim
 apt install -y git
-git clone https://github.com/yazidtarmoul/ZeroTrust.git /tmp/wlkom-src
+git clone https://github.com/YTX10/ZeroTrust.git /tmp/wlkom-src
 cp /tmp/wlkom-src/rootkit/wlkom.c /root/wlkom/zroot/
 cp /tmp/wlkom-src/rootkit/Makefile /root/wlkom/zroot/
 ```
@@ -1011,7 +1011,7 @@ mv /tmp/wlkom.c /opt/wlkom-c2/rootkit/wlkom.c
 ```bash
 # En root sur la VM attacker
 apt install -y git
-git clone https://github.com/yazidtarmoul/ZeroTrust.git /tmp/wlkom-src
+git clone https://github.com/YTX10/ZeroTrust.git /tmp/wlkom-src
 cp /tmp/wlkom-src/attacking_program/c2.py /opt/wlkom-c2/server/c2.py
 cp /tmp/wlkom-src/rootkit/wlkom.c /opt/wlkom-c2/rootkit/wlkom.c
 ```
