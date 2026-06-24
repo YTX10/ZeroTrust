@@ -169,11 +169,14 @@ Les deux VMs utilisent **Debian 12 (Bookworm)**.
 | **IP** | 192.168.122.18 | 192.168.122.96 |
 | **Credentials** | root / root | root / root |
 
-> **Pourquoi Debian 12 ?**
-> - Noyau LTS 6.1 stable et bien documente
-> - Headers noyau disponibles directement via `apt`
-> - Support complet de ftrace (indispensable pour hooker les syscalls)
-> - Compatible avec la crypto noyau ChaCha20-Poly1305 (`libchacha20poly1305`)
+> **Pourquoi Debian 12 (Bookworm) et pas une version plus recente ?**
+>
+> - **Noyau 6.1 LTS** : version Long Term Support maintenue jusqu'en decembre 2026. Le kernel 6.1 est la derniere version LTS compatible avec `ftrace_set_filter_ip()` sans modifications majeures de l'API. Les noyaux plus recents (6.5+) ont modifie certaines structures internes de ftrace (cf. commit `dda4d22`), ce qui compliquerait le code de hooking sans apporter de benefice pour un rootkit pedagogique.
+> - **Headers noyau stables** : les `linux-headers-6.1.0-*` sont disponibles directement via `apt`, ce qui evite de compiler un noyau custom. Les versions rolling-release (Arch, Fedora) changent de noyau a chaque mise a jour, cassant potentiellement la compilation du module.
+> - **API crypto noyau** : le module `chacha20poly1305` (`<crypto/chacha20poly1305.h>`) est present et fonctionnel dans le 6.1. Certaines distributions plus recentes ont deplace ou renomme ces headers.
+> - **`kallsyms_lookup_name` non exporte depuis Linux 5.7** : on utilise la technique `kprobe` pour resoudre les symboles, qui fonctionne de maniere fiable sur le 6.1 (pas de restrictions supplementaires comme sur le 6.6+ avec `CONFIG_SECURITY_LOCKDOWN`).
+> - **Reproductibilite** : Debian 12.0.0 est une version fige (archivee sur `cdimage.debian.org`). N'importe qui peut telecharger exactement le meme ISO et obtenir le meme environnement, contrairement a une version "current" qui evolue.
+> - **Sources** : [Kernel LTS releases](https://www.kernel.org/category/releases.html), [Debian 12 release notes](https://www.debian.org/releases/bookworm/releasenotes)
 
 ---
 
@@ -268,21 +271,20 @@ sudo systemctl status libvirtd
 
 ### 4.1 - Telecharger l'ISO Debian 12
 
-**Option A (recommandee) — ISO DVD** (~4 Go, contient tous les paquets, pas besoin d'internet pendant l'installation) :
+Lien de telechargement :
+
+```
+https://cdimage.debian.org/cdimage/archive/12.0.0/amd64/iso-cd/
+```
+
+Telecharger le fichier `debian-12.0.0-amd64-netinst.iso` (~600 Mo).
 
 ```bash
 cd ~/Downloads
-wget https://cdimage.debian.org/debian-cd/current/amd64/iso-dvd/debian-12.11.0-amd64-DVD-1.iso
+wget https://cdimage.debian.org/cdimage/archive/12.0.0/amd64/iso-cd/debian-12.0.0-amd64-netinst.iso
 ```
 
-**Option B — ISO netinst** (~600 Mo, necessite un acces internet dans la VM pendant l'installation) :
-
-```bash
-cd ~/Downloads
-wget https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-12.11.0-amd64-netinst.iso
-```
-
-> Si les liens ne fonctionnent plus : allez sur https://www.debian.org/download et prenez l'ISO **DVD** ou **netinst** pour **amd64**.
+> C'est le meme ISO pour les deux VMs (attaquante et victime). Une seule copie suffit.
 
 Verifiez que le fichier est bien telecharge :
 
@@ -300,6 +302,9 @@ ls -lh ~/Downloads/debian-12*.iso
 virt-manager
 ```
 
+<!-- SCREENSHOT: virt-manager fenetre principale -->
+<!-- ![virt-manager](screenshots/virt-manager-main.png) -->
+
 **Etape 2** - Cliquez sur le bouton **"+"** (Creer une nouvelle machine virtuelle) en haut a gauche.
 
 **Etape 3** - Source d'installation :
@@ -311,6 +316,9 @@ virt-manager
 - Naviguez vers `~/Downloads/` et selectionnez l'ISO Debian 12 telechargee
 - Le systeme detecte automatiquement "Debian 12"
 - Cliquez **Suivant**
+
+<!-- SCREENSHOT: selection de l'ISO dans virt-manager -->
+<!-- ![ISO selection](screenshots/virt-manager-iso.png) -->
 
 **Etape 5** - Memoire et CPU :
 ```
@@ -332,6 +340,9 @@ Nom : victim
 - Cochez : **"Personnaliser la configuration avant l'installation"**
 - Reseau : verifiez que c'est **"Reseau virtuel 'default' : NAT"**
 - Cliquez **Terminer**
+
+<!-- SCREENSHOT: configuration finale VM (nom, reseau) -->
+<!-- ![VM config](screenshots/virt-manager-config.png) -->
 
 **Etape 8** - Dans la fenetre de configuration qui s'ouvre, cliquez **"Commencer l'installation"** en haut a gauche.
 
@@ -358,9 +369,8 @@ L'installateur Debian se lance. Suivez ces etapes :
 
 **Configuration du miroir Debian :**
 
-- Si vous utilisez l'**ISO DVD** : l'installateur ne demande pas de miroir (tout est sur le DVD). S'il le demande, choisissez **"Non"** / **"Continuer sans miroir reseau"**.
-- Si vous utilisez l'**ISO netinst** : selectionnez `France` → `deb.debian.org`.
-  - **Si ca boucle** (retour a l'ecran precedent) : la VM n'a pas acces a internet. Choisissez **"Revenir en arriere"** puis **"Continuer sans miroir reseau"**. Vous configurerez le miroir apres l'installation (voir ci-dessous).
+- Selectionnez `France` → `deb.debian.org`.
+- **Si ca boucle** (retour a l'ecran precedent) : la VM n'a pas acces a internet. Choisissez **"Revenir en arriere"** puis **"Continuer sans miroir reseau"**. Vous configurerez le miroir apres l'installation (voir ci-dessous).
 
 **Selection des logiciels** (ecran important) :
 
@@ -449,12 +459,22 @@ ping -c 2 192.168.122.18
 
 ## 5 - Configuration de la VM Victime
 
-Connectez-vous a la VM Victime :
+Connectez-vous a la VM Victime.
+
+> **Important** : Par defaut, Debian n'autorise PAS la connexion SSH directe en tant que root.
+> Il faut d'abord se connecter avec le compte utilisateur cree pendant l'installation, puis passer root.
 
 ```bash
-ssh root@192.168.122.18
-# Mot de passe : root
+# 1. Se connecter en tant qu'utilisateur normal
+ssh user@192.168.122.18
+# Mot de passe : celui choisi a l'installation
+
+# 2. Une fois connecte, passer root
+su -
+# Mot de passe : root (celui choisi a l'installation)
 ```
+
+> A partir de maintenant, toutes les commandes sont executees en **root** dans la VM.
 
 ### 5.1 - Installer les outils de compilation
 
@@ -496,10 +516,15 @@ mkdir -p /root/wlkom/rootkit
 
 ## 6 - Configuration de la VM Attaquante
 
-Connectez-vous a la VM Attaquante :
+Connectez-vous a la VM Attaquante (meme methode que pour la victime) :
 
 ```bash
-ssh root@192.168.122.96
+# 1. Se connecter en tant qu'utilisateur normal
+ssh user@192.168.122.96
+# Mot de passe : celui choisi a l'installation
+
+# 2. Passer root
+su -
 # Mot de passe : root
 ```
 
@@ -560,19 +585,26 @@ Depuis la **machine hote**, dans le repertoire du projet :
 ```bash
 cd wlkom/
 
-# Copier le code source
-scp rootkit/wlkom.c root@192.168.122.18:/root/wlkom/rootkit/
+# Copier le code source vers la VM Victime
+scp rootkit/wlkom.c user@192.168.122.18:/tmp/
+scp rootkit/Makefile user@192.168.122.18:/tmp/
+```
 
-# Copier le Makefile
-scp rootkit/Makefile root@192.168.122.18:/root/wlkom/rootkit/
+Ensuite, connectez-vous a la VM et deplacez les fichiers en root :
+
+```bash
+ssh user@192.168.122.18
+su -
+# Mot de passe : root
+mv /tmp/wlkom.c /root/wlkom/rootkit/
+mv /tmp/Makefile /root/wlkom/rootkit/
 ```
 
 ### 7.2 - Compiler
 
-Connectez-vous a la VM Victime et lancez la compilation :
+Toujours en root dans la VM Victime :
 
 ```bash
-ssh root@192.168.122.18
 cd /root/wlkom/rootkit
 make
 ```
@@ -611,6 +643,9 @@ parm:           pw_hash:charp
 parm:           c2_ip:charp
 parm:           c2_port:int
 ```
+
+<!-- SCREENSHOT: compilation reussie (sortie make + modinfo) -->
+<!-- ![Compilation](screenshots/compilation.png) -->
 
 ### 7.4 - Nettoyage (optionnel)
 
@@ -684,6 +719,9 @@ dmesg | tail -10
 
 > **Attention** : une fois actif, le rootkit filtre `dmesg` et ces lignes disparaissent !
 
+<!-- SCREENSHOT: sortie dmesg apres chargement du rootkit -->
+<!-- ![dmesg](screenshots/dmesg-loaded.png) -->
+
 ### 8.4 - Verifier la dissimulation
 
 Apres quelques secondes, le rootkit se cache completement :
@@ -709,6 +747,9 @@ ls /root/wlkom/
 ss -tnp | grep 9999
 # (aucun resultat = OK)
 ```
+
+<!-- SCREENSHOT: preuves de dissimulation (lsmod vide, ls vide, ss vide) -->
+<!-- ![Stealth proof](screenshots/stealth-proof.png) -->
 
 ### 8.5 - Persistence au reboot
 
@@ -736,20 +777,24 @@ Depuis la **machine hote** :
 ```bash
 cd wlkom/
 
-# Copier le serveur C2
-scp attacking_program/c2.py root@192.168.122.96:/opt/wlkom-c2/server/c2.py
+# Copier les fichiers vers la VM Attaquante
+scp attacking_program/c2.py user@192.168.122.96:/tmp/
+scp rootkit/wlkom.c user@192.168.122.96:/tmp/
+```
 
-# Copier le code du rootkit (pour compilation a distance)
-scp rootkit/wlkom.c root@192.168.122.96:/opt/wlkom-c2/rootkit/wlkom.c
+Connectez-vous et deplacez les fichiers en root :
+
+```bash
+ssh user@192.168.122.96
+su -
+# Mot de passe : root
+mv /tmp/c2.py /opt/wlkom-c2/server/c2.py
+mv /tmp/wlkom.c /opt/wlkom-c2/rootkit/wlkom.c
 ```
 
 ### 9.2 - Demarrer le serveur C2
 
-Connectez-vous a la **VM Attaquante** :
-
-```bash
-ssh root@192.168.122.96
-```
+Toujours en root dans la **VM Attaquante** :
 
 **Option A** - Lancement au premier plan (voir les logs en direct) :
 
@@ -801,6 +846,9 @@ http://192.168.122.96:8080
 
 > Remplacez `192.168.122.96` par l'IP de votre VM Attaquante.
 
+<!-- SCREENSHOT: logs du C2 au demarrage + connexion rootkit -->
+<!-- ![C2 startup](screenshots/c2-startup-logs.png) -->
+
 ---
 
 ## 10 - Utilisation de l'interface web
@@ -821,6 +869,9 @@ L'interface a **deux niveaux de securite** :
 | Session | Dure 1 heure, renouvelee a chaque action |
 
 Entrez `zerotrust` et cliquez **Login**.
+
+<!-- SCREENSHOT: page de login du C2 -->
+<!-- ![Login page](screenshots/c2-login.png) -->
 
 ---
 
@@ -848,6 +899,9 @@ root@victim:/# _
 
 > Vous etes maintenant connecte avec un **acces root complet** a la machine victime.
 
+<!-- SCREENSHOT: terminal apres authentification reussie -->
+<!-- ![Terminal auth](screenshots/c2-terminal-auth.png) -->
+
 ---
 
 ### 10.2 - Les panneaux de l'interface
@@ -866,21 +920,30 @@ Vue d'ensemble du systeme.
 | System info | OS, noyau, hostname, uptime de la victime |
 | Metrics | CPU, RAM, disque de la victime |
 
+<!-- SCREENSHOT: dashboard avec status connecte -->
+<!-- ![Dashboard](screenshots/c2-dashboard.png) -->
+
 ---
 
 #### Terminal
 
 Terminal interactif pour executer des commandes sur la victime.
 
+Le terminal affiche pour chaque commande :
+- **stdout** : la sortie standard de la commande
+- **stderr** : les messages d'erreur (affiches en rouge)
+- **exit status** : le code de retour (0 = succes, autre = erreur)
+
 Exemples de commandes :
 
 ```bash
-whoami                    # → root
-hostname                  # → victim
-ls -la /etc/              # → liste des fichiers
-cat /etc/shadow           # → hashes des mots de passe
-ip addr                   # → interfaces reseau
-ps aux                    # → processus en cours
+whoami                    # → root                    (exit: 0)
+hostname                  # → victim                  (exit: 0)
+ls -la /etc/              # → liste des fichiers      (exit: 0)
+cat /etc/shadow           # → hashes des mots de passe(exit: 0)
+cat /fichier/inexistant   # → stderr: No such file    (exit: 1)
+ip addr                   # → interfaces reseau       (exit: 0)
+ps aux                    # → processus en cours      (exit: 0)
 ```
 
 **Commandes speciales :**
@@ -891,6 +954,9 @@ ps aux                    # → processus en cours
 | `upload <chemin>` | Envoie un fichier vers la victime |
 | `download <chemin>` | Telecharge un fichier depuis la victime |
 | `clear` | Efface l'ecran du terminal |
+
+<!-- SCREENSHOT: terminal en action avec commandes executees -->
+<!-- ![Terminal](screenshots/c2-terminal.png) -->
 
 ---
 
@@ -907,6 +973,9 @@ Navigateur de fichiers de la machine victime.
 | Envoyer un fichier | **Upload** | Envoie un fichier depuis votre machine |
 | Supprimer | Poubelle (rouge) | Supprime avec confirmation |
 
+<!-- SCREENSHOT: navigateur de fichiers -->
+<!-- ![File System](screenshots/c2-filesystem.png) -->
+
 ---
 
 #### Processes
@@ -915,6 +984,9 @@ Liste des processus en cours sur la victime (equivalent de `ps aux`).
 
 - Affiche : PID, utilisateur, CPU%, MEM%, commande
 - Bouton **Kill** pour terminer un processus (envoie `SIGKILL`)
+
+<!-- SCREENSHOT: liste des processus -->
+<!-- ![Processes](screenshots/c2-processes.png) -->
 
 ---
 
@@ -951,6 +1023,9 @@ Capture des frappes clavier de la victime.
 - Le keylogger demarre automatiquement au chargement du rootkit
 - Bouton **Dump** pour recuperer le buffer
 
+<!-- SCREENSHOT: keylogger avec frappes capturees -->
+<!-- ![Keylogger](screenshots/c2-keylogger.png) -->
+
 ---
 
 #### Modules
@@ -972,6 +1047,9 @@ Affiche l'etat de chaque mecanisme :
 - Logs noyau filtres
 - Connexion cachee de ss/netstat
 - PID du kthread cache
+
+<!-- SCREENSHOT: panneau stealth avec tous les statuts -->
+<!-- ![Stealth](screenshots/c2-stealth.png) -->
 
 ---
 
@@ -1001,6 +1079,9 @@ Mapping des techniques MITRE ATT&CK utilisees par le rootkit :
 | **Compile** | Compile le rootkit a distance sur la victime |
 | **Load** | Charge le module (insmod) |
 | **Uninstall** | Decharge le module + supprime la persistence + nettoie |
+
+<!-- SCREENSHOT: panneau deploy -->
+<!-- ![Deploy](screenshots/c2-deploy.png) -->
 
 ---
 
@@ -1395,15 +1476,19 @@ wlkom/
 ├── README.md                        Ce fichier (documentation complete)
 ├── TODO                             Fonctionnalites done + futures
 │
+├── screenshots/                     Captures d'ecran de l'interface et des VMs
+│
 ├── rootkit/
 │   ├── wlkom.c                      Code source du rootkit (1166 lignes C)
+│   ├── wlkom_commented.c            Version commentee (explications detaillees + glossaire)
 │   ├── Makefile                     Compilation du module noyau
 │   ├── ssh_victim.sh                Raccourci SSH vers la victime
 │   └── ssh_attacker.sh              Raccourci SSH vers l'attaquant
 │
 └── attacking_program/
-    └── c2.py                        Serveur C2 complet (~3500 lignes Python)
-                                     HTML + CSS + JS embarques
+    ├── c2.py                        Serveur C2 complet (~3500 lignes Python)
+    │                                HTML + CSS + JS embarques
+    └── c2_commented.py              Version commentee du backend (+ glossaire)
 ```
 
 ### Dependances completes
@@ -1432,5 +1517,5 @@ wlkom/
 <p align="center">
   <b>WLKOM</b> — Wild Linux Kernel Object Module<br>
   Projet EPITA SYS2 — APPING1<br>
-  <i>prenom.nom</i>
+  <i>yazid.tarmoul</i>
 </p>
