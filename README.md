@@ -682,7 +682,6 @@ uname -r
 mkdir -p /root/wlkom/zroot
 ```
 
-![Création du répertoire](screenshots/Partie5/mkdir-wlkom.png)
 
 ---
 
