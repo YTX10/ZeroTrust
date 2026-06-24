@@ -1228,8 +1228,6 @@ Terminal interactif chiffré pour exécuter des commandes sur la victime en temp
 
 ![Terminal commandes](screenshots/Partie10/terminal-cmds-1.png)
 
-**Exécution de commandes (cat /etc/shadow, ifconfig, etc.) :**
-
 ![Terminal commandes suite](screenshots/Partie10/terminal-cmds-2.png)
 
 ---
