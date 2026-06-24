@@ -250,7 +250,7 @@ virsh list --all
 
 ---
 
-### Verification finale
+### Vérification finale
 
 Si vous voyez un tableau (meme vide), l'installation est reussie :
 
